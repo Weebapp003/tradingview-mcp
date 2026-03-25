@@ -272,6 +272,29 @@ Claude Code  ←→  MCP Server (stdio)  ←→  CDP (port 9222)  ←→  Tradin
 - Node.js 18+
 - Claude Code with MCP support
 
+## Disclaimer
+
+This project is provided **for personal, educational, and research purposes only**.
+
+**This tool is not affiliated with, endorsed by, or associated with TradingView Inc.** TradingView is a trademark of TradingView Inc.
+
+By using this software, you acknowledge and agree that:
+
+1. **You are solely responsible** for ensuring your use of this tool complies with [TradingView's Terms of Use](https://www.tradingview.com/policies/) and all applicable laws.
+2. TradingView's Terms of Use **restrict automated data collection, scraping, and non-display usage** of their platform and data. This tool uses Chrome DevTools Protocol to programmatically interact with the TradingView Desktop app, which may conflict with those terms.
+3. **You assume all risk** associated with using this tool. The authors are not responsible for any account bans, suspensions, legal actions, or other consequences resulting from its use.
+4. This tool **must not be used** to:
+   - Redistribute, resell, or commercially exploit TradingView's market data
+   - Circumvent TradingView's access controls or subscription restrictions
+   - Perform automated trading or algorithmic decision-making using extracted data
+   - Violate the intellectual property rights of Pine Script indicator authors
+5. Market data displayed by TradingView is sourced from exchanges and data providers with their own licensing terms. **Do not redistribute this data.**
+6. This tool accesses internal, undocumented TradingView APIs that may change or break at any time without notice.
+
+**Use at your own risk.** If you are unsure whether your intended use complies with TradingView's terms, do not use this tool.
+
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE) for details.
+
+The MIT license applies to the source code of this project only. It does not grant any rights to TradingView's software, data, trademarks, or intellectual property.
