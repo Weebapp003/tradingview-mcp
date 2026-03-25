@@ -1,21 +1,20 @@
 # TradingView MCP Bridge
 
-Control TradingView Desktop from Claude Code via Chrome DevTools Protocol. **68 tools** across 13 categories — chart control, Pine Script editing, data extraction, Pine graphics extraction (line.new/label.new/box.new/table.new), drawing, alerts, replay trading, and more.
+Personal AI assistant for your TradingView Desktop charts. Connects Claude Code to your local TradingView app via Chrome DevTools Protocol for AI-assisted chart analysis, Pine Script development, and workflow automation.
+
+> **For personal use only.** See [Disclaimer](#disclaimer) for important information about TradingView's Terms of Service.
 
 ## What It Does
 
-Claude Code connects to your running TradingView Desktop app and can:
+Gives your AI assistant eyes and hands on your own chart:
 
-- **Read and write Pine Script** — inject code, compile, read errors, manage saved scripts
-- **Control the chart** — change symbol, timeframe, zoom to dates, add/remove indicators
-- **Extract data** — OHLCV bars, strategy results, equity curves, real-time quotes
-- **Extract Pine graphics** — read price levels from `line.new()`, text from `label.new()`, table data from `table.new()`, box boundaries from `box.new()` — even from protected/encrypted indicators
-- **Read indicator values** — current RSI, MACD, Bollinger Bands, EMA values from the data window
+- **Pine Script development** — write, inject, compile, debug, and iterate on scripts with AI assistance
+- **Chart navigation** — change symbols, timeframes, zoom to dates, add/remove indicators
+- **Visual analysis** — read your chart's indicator values, price levels, and annotations
 - **Draw on charts** — trend lines, horizontal lines, rectangles, text annotations
 - **Manage alerts** — create, list, and delete price alerts
-- **Replay trading** — start replay, step through bars, execute trades, track P&L
-- **Automate UI** — click buttons, toggle panels, switch layouts, manage watchlists
-- **Take screenshots** — full page, chart region, or strategy tester
+- **Replay practice** — step through historical bars, practice entries/exits
+- **Screenshots** — capture chart state for AI visual analysis
 - **Launch TradingView** — auto-detect and launch with debug mode from any platform
 
 ## Quick Start
@@ -126,7 +125,7 @@ The key flag is `--remote-debugging-port=9222`. This enables Chrome DevTools Pro
 | `pine_open` | Open a saved script by name |
 | `pine_list_scripts` | List saved scripts from the editor dropdown |
 
-### Data Extraction (12)
+### Data & Indicator Reading (12)
 | Tool | What it does |
 |------|-------------|
 | `data_get_ohlcv` | Get OHLCV bar data (max 500 bars) |
@@ -136,11 +135,11 @@ The key flag is `--remote-debugging-port=9222`. This enables Chrome DevTools Pro
 | `data_get_equity` | Get equity curve data |
 | `quote_get` | Get real-time quote — last, OHLC, volume |
 | `depth_get` | Get order book / DOM data |
-| **`data_get_pine_lines`** | **Extract price levels from Pine `line.new()` drawings** |
-| **`data_get_pine_labels`** | **Extract text + price from Pine `label.new()` drawings** |
-| **`data_get_pine_tables`** | **Extract table cell text from Pine `table.new()` drawings** |
-| **`data_get_pine_boxes`** | **Extract price boundaries from Pine `box.new()` drawings** |
-| **`data_get_study_values`** | **Get current values from all indicators via data window** |
+| `data_get_pine_lines` | Read price levels from Pine `line.new()` on your chart |
+| `data_get_pine_labels` | Read text + price from Pine `label.new()` on your chart |
+| `data_get_pine_tables` | Read table cell text from Pine `table.new()` on your chart |
+| `data_get_pine_boxes` | Read price boundaries from Pine `box.new()` on your chart |
+| `data_get_study_values` | Get current values from all visible indicators |
 
 ### Indicators (2)
 | Tool | What it does |
@@ -206,36 +205,28 @@ The key flag is `--remote-debugging-port=9222`. This enables Chrome DevTools Pro
 | `watchlist_get` | Read watchlist — symbols, prices, changes |
 | `watchlist_add` | Add a symbol to the watchlist |
 
-## Pine Graphics Extraction
+## Reading Pine Script Indicator Output
 
-The `data_get_pine_*` tools can read data from **any visible Pine Script indicator**, even protected/encrypted ones. They access TradingView's internal graphics pipeline:
+The `data_get_pine_*` tools let your AI assistant read what's visually displayed on your chart by your own Pine Script indicators — the same information you see with your eyes.
 
-```
-study._graphics._primitivesCollection
-  .dwglines.get('lines').get(false)._primitivesDataById     → line prices (y1, y2)
-  .dwglabels.get('labels').get(false)._primitivesDataById    → label text + price
-  .dwgboxes.get('boxes').get(false)._primitivesDataById      → box boundaries
-  .dwgtablecells.get('tableCells')._primitivesDataById       → table cell text
-```
+This includes levels drawn with `line.new()`, text from `label.new()`, session tables from `table.new()`, and zones from `box.new()`. This enables AI-assisted analysis of your custom indicator output.
 
 **Requirements:**
-- The indicator must be **visible** on the chart (hidden studies don't receive graphics data from the server)
+- The indicator must be **visible** on your chart
 - The indicator uses Pine's drawing functions (`line.new()`, `label.new()`, `box.new()`, `table.new()`)
 
-**Example — extract all levels from a custom profiler:**
+**Example prompts:**
 ```
-"Use data_get_pine_lines to get all horizontal price levels"
-"Use data_get_pine_tables with study_filter 'Profiler' to read the session table"
-"Use data_get_pine_labels to get all text annotations with prices"
+"What levels is my profiler showing right now?"
+"Read the session stats table and tell me how today compares to the 10-day median"
+"What are the key support/resistance lines on my chart?"
 ```
 
 ## Example Workflows
 
-### Full Chart Analysis Report
+### AI Chart Analysis
 ```
-"Get all indicator values with data_get_study_values, extract custom levels with
-data_get_pine_lines and data_get_pine_tables, pull 100 bars of OHLCV, and build
-me a confluence analysis report"
+"Read my indicators, check the key levels on my chart, and give me a confluence report"
 ```
 
 ### Pine Script Development
@@ -261,9 +252,6 @@ Claude Code  ←→  MCP Server (stdio)  ←→  CDP (port 9222)  ←→  Tradin
 
 - **Transport**: MCP over stdio
 - **Connection**: Chrome DevTools Protocol on localhost:9222
-- **API access**: Direct paths to TradingView internals — no DOM scraping where avoidable
-- **Pine Editor**: Monaco accessed via React fiber tree traversal
-- **Pine Graphics**: Internal `_primitivesCollection` pipeline with `_primitivesDataById` Maps
 - **No dependencies** beyond `@modelcontextprotocol/sdk` and `chrome-remote-interface`
 
 ## Requirements
