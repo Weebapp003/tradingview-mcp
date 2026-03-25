@@ -1,7 +1,9 @@
 import { getClient, getTargetInfo, evaluate } from '../connection.js';
-import { writeFileSync, mkdirSync } from 'fs';
+import { writeFileSync, mkdirSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { execSync, spawn } from 'child_process';
+import { z } from 'zod';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCREENSHOT_DIR = join(dirname(dirname(__dirname)), 'screenshots');
@@ -276,6 +278,146 @@ export function registerHealthTools(server) {
 
       return {
         content: [{ type: 'text', text: JSON.stringify({ success: true, ...state }, null, 2) }],
+      };
+    } catch (err) {
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ success: false, error: err.message }, null, 2) }],
+        isError: true,
+      };
+    }
+  });
+
+  // ── Launch TradingView in Debug Mode ──────────────────────────────────
+  server.tool('tv_launch', 'Launch TradingView Desktop with Chrome DevTools Protocol (remote debugging) enabled. Auto-detects install location on Mac, Windows, and Linux.', {
+    port: z.number().optional().describe('CDP port (default 9222)'),
+    kill_existing: z.boolean().optional().describe('Kill existing TradingView instances first (default true)'),
+  }, async ({ port, kill_existing }) => {
+    const cdpPort = port || 9222;
+    const killFirst = kill_existing !== false;
+
+    try {
+      const platform = process.platform; // darwin, win32, linux
+
+      // Auto-detect TradingView binary
+      let tvPath = null;
+      const paths = {
+        darwin: [
+          '/Applications/TradingView.app/Contents/MacOS/TradingView',
+          `${process.env.HOME}/Applications/TradingView.app/Contents/MacOS/TradingView`,
+        ],
+        win32: [
+          `${process.env.LOCALAPPDATA}\\TradingView\\TradingView.exe`,
+          `${process.env.PROGRAMFILES}\\TradingView\\TradingView.exe`,
+          `${process.env['PROGRAMFILES(X86)']}\\TradingView\\TradingView.exe`,
+        ],
+        linux: [
+          '/opt/TradingView/tradingview',
+          '/opt/TradingView/TradingView',
+          `${process.env.HOME}/.local/share/TradingView/TradingView`,
+          '/usr/bin/tradingview',
+          '/snap/tradingview/current/tradingview',
+        ],
+      };
+
+      const candidates = paths[platform] || paths.linux;
+      for (const p of candidates) {
+        if (p && existsSync(p)) { tvPath = p; break; }
+      }
+
+      // Fallback: try which/where
+      if (!tvPath) {
+        try {
+          const cmd = platform === 'win32' ? 'where TradingView.exe' : 'which tradingview';
+          tvPath = execSync(cmd, { timeout: 3000 }).toString().trim().split('\n')[0];
+          if (tvPath && !existsSync(tvPath)) tvPath = null;
+        } catch { /* ignore */ }
+      }
+
+      // Mac fallback: mdfind
+      if (!tvPath && platform === 'darwin') {
+        try {
+          const found = execSync('mdfind "kMDItemFSName == TradingView.app" | head -1', { timeout: 5000 }).toString().trim();
+          if (found) {
+            const candidate = `${found}/Contents/MacOS/TradingView`;
+            if (existsSync(candidate)) tvPath = candidate;
+          }
+        } catch { /* ignore */ }
+      }
+
+      if (!tvPath) {
+        return {
+          content: [{ type: 'text', text: JSON.stringify({
+            success: false,
+            error: 'TradingView not found',
+            platform,
+            searched: candidates,
+            hint: 'Install TradingView Desktop or launch manually with: /path/to/TradingView --remote-debugging-port=' + cdpPort,
+          }, null, 2) }],
+          isError: true,
+        };
+      }
+
+      // Kill existing instances
+      if (killFirst) {
+        try {
+          if (platform === 'win32') {
+            execSync('taskkill /F /IM TradingView.exe', { timeout: 5000 });
+          } else {
+            execSync('pkill -f TradingView', { timeout: 5000 });
+          }
+          await new Promise(r => setTimeout(r, 1500));
+        } catch { /* may not be running */ }
+      }
+
+      // Launch TradingView with CDP flag
+      const child = spawn(tvPath, [`--remote-debugging-port=${cdpPort}`], {
+        detached: true,
+        stdio: 'ignore',
+      });
+      child.unref();
+
+      // Wait for CDP to come up
+      let cdpReady = false;
+      for (let i = 0; i < 15; i++) {
+        await new Promise(r => setTimeout(r, 1000));
+        try {
+          const http = await import('http');
+          const ready = await new Promise((resolve) => {
+            http.get(`http://localhost:${cdpPort}/json/version`, (res) => {
+              let data = '';
+              res.on('data', (chunk) => data += chunk);
+              res.on('end', () => resolve(data));
+            }).on('error', () => resolve(null));
+          });
+          if (ready) {
+            cdpReady = true;
+            const info = JSON.parse(ready);
+            return {
+              content: [{ type: 'text', text: JSON.stringify({
+                success: true,
+                platform,
+                binary: tvPath,
+                pid: child.pid,
+                cdp_port: cdpPort,
+                cdp_url: `http://localhost:${cdpPort}`,
+                browser: info.Browser,
+                user_agent: info['User-Agent'],
+              }, null, 2) }],
+            };
+          }
+        } catch { /* retry */ }
+      }
+
+      return {
+        content: [{ type: 'text', text: JSON.stringify({
+          success: true,
+          platform,
+          binary: tvPath,
+          pid: child.pid,
+          cdp_port: cdpPort,
+          cdp_ready: false,
+          warning: 'TradingView launched but CDP not responding yet. It may still be loading. Try tv_health_check in a few seconds.',
+        }, null, 2) }],
       };
     } catch (err) {
       return {

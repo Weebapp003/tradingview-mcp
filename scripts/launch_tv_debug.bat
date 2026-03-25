@@ -1,19 +1,48 @@
 @echo off
-REM Launch TradingView Desktop with Chrome DevTools Protocol enabled on port 9222
-REM MSIX apps don't inherit env vars from shell, so we launch the EXE directly with the flag
+REM Launch TradingView Desktop on Windows with Chrome DevTools Protocol enabled
+REM Usage: scripts\launch_tv_debug.bat [port]
+
+set PORT=%1
+if "%PORT%"=="" set PORT=9222
 
 REM Kill existing TradingView instances
 taskkill /F /IM TradingView.exe >nul 2>&1
 timeout /t 2 /nobreak >nul
 
-echo Starting TradingView Desktop with CDP on port 9222...
-start "" "C:\Program Files\WindowsApps\TradingView.Desktop_3.0.0.7652_x64__n534cwy3pjxzj\TradingView.exe" --remote-debugging-port=9222 --user-data-dir="C:\Users\babco\AppData\Roaming\TradingView"
+REM Auto-detect TradingView install location
+set "TV_EXE="
+
+REM Check common install locations
+if exist "%LOCALAPPDATA%\TradingView\TradingView.exe" set "TV_EXE=%LOCALAPPDATA%\TradingView\TradingView.exe"
+if exist "%PROGRAMFILES%\TradingView\TradingView.exe" set "TV_EXE=%PROGRAMFILES%\TradingView\TradingView.exe"
+if exist "%PROGRAMFILES(x86)%\TradingView\TradingView.exe" set "TV_EXE=%PROGRAMFILES(x86)%\TradingView\TradingView.exe"
+
+REM Check MSIX / Windows Store installs
+if "%TV_EXE%"=="" (
+    for /f "tokens=*" %%i in ('dir /s /b "%PROGRAMFILES%\WindowsApps\TradingView*\TradingView.exe" 2^>nul') do set "TV_EXE=%%i"
+)
+if "%TV_EXE%"=="" (
+    for /f "tokens=*" %%i in ('where TradingView.exe 2^>nul') do set "TV_EXE=%%i"
+)
+
+if "%TV_EXE%"=="" (
+    echo Error: TradingView not found.
+    echo Checked: %%LOCALAPPDATA%%\TradingView, %%PROGRAMFILES%%\TradingView, WindowsApps
+    echo.
+    echo If installed elsewhere, run manually:
+    echo   "C:\path\to\TradingView.exe" --remote-debugging-port=%PORT%
+    exit /b 1
+)
+
+echo Found TradingView at: %TV_EXE%
+echo Starting with --remote-debugging-port=%PORT%...
+start "" "%TV_EXE%" --remote-debugging-port=%PORT%
 
 echo Waiting for CDP to become available...
 timeout /t 5 /nobreak >nul
 
 :check
-curl -s http://localhost:9222/json/version >nul 2>&1
+curl -s http://localhost:%PORT%/json/version >nul 2>&1
 if %errorlevel% neq 0 (
     echo Still waiting...
     timeout /t 2 /nobreak >nul
@@ -21,7 +50,6 @@ if %errorlevel% neq 0 (
 )
 
 echo.
-echo CDP is ready on http://localhost:9222
-curl -s http://localhost:9222/json/version
+echo CDP ready at http://localhost:%PORT%
+curl -s http://localhost:%PORT%/json/version
 echo.
-echo TradingView is running with remote debugging enabled.

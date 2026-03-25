@@ -1,6 +1,6 @@
 # TradingView MCP Bridge
 
-Control TradingView Desktop from Claude Code via Chrome DevTools Protocol. 55 tools across 12 categories — chart control, Pine Script editing, data extraction, drawing, alerts, replay trading, and more.
+Control TradingView Desktop from Claude Code via Chrome DevTools Protocol. **68 tools** across 13 categories — chart control, Pine Script editing, data extraction, Pine graphics extraction (line.new/label.new/box.new/table.new), drawing, alerts, replay trading, and more.
 
 ## What It Does
 
@@ -9,18 +9,21 @@ Claude Code connects to your running TradingView Desktop app and can:
 - **Read and write Pine Script** — inject code, compile, read errors, manage saved scripts
 - **Control the chart** — change symbol, timeframe, zoom to dates, add/remove indicators
 - **Extract data** — OHLCV bars, strategy results, equity curves, real-time quotes
+- **Extract Pine graphics** — read price levels from `line.new()`, text from `label.new()`, table data from `table.new()`, box boundaries from `box.new()` — even from protected/encrypted indicators
+- **Read indicator values** — current RSI, MACD, Bollinger Bands, EMA values from the data window
 - **Draw on charts** — trend lines, horizontal lines, rectangles, text annotations
 - **Manage alerts** — create, list, and delete price alerts
 - **Replay trading** — start replay, step through bars, execute trades, track P&L
 - **Automate UI** — click buttons, toggle panels, switch layouts, manage watchlists
 - **Take screenshots** — full page, chart region, or strategy tester
+- **Launch TradingView** — auto-detect and launch with debug mode from any platform
 
 ## Quick Start
 
 ### 1. Install
 
 ```bash
-git clone https://github.com/the-daily-profiler/tradingview-mcp.git
+git clone https://github.com/thedailyprofiler/tradingview-mcp.git
 cd tradingview-mcp
 npm install
 ```
@@ -29,50 +32,71 @@ npm install
 
 TradingView Desktop must be running with Chrome DevTools Protocol enabled on port 9222.
 
-**Windows** — use the included launch script:
+**Mac:**
+```bash
+./scripts/launch_tv_debug_mac.sh
+```
+
+**Windows:**
 ```bash
 scripts\launch_tv_debug.bat
 ```
 
-Or launch manually:
+**Linux:**
 ```bash
-"C:\Program Files\TradingView\TradingView.exe" --remote-debugging-port=9222
+./scripts/launch_tv_debug_linux.sh
 ```
 
-**Mac/Linux** — find your TradingView binary and add the flag:
+**Or launch manually on any platform:**
 ```bash
 /path/to/TradingView --remote-debugging-port=9222
 ```
 
+**Or use the MCP tool** (auto-detects your install):
+> "Use tv_launch to start TradingView in debug mode"
+
 ### 3. Add to Claude Code
 
-Add to your Claude Code MCP config (`~/.claude/claude_desktop_config.json` or project `.mcp.json`):
+Add to your Claude Code MCP config (`~/.claude/.mcp.json` or project `.mcp.json`):
 
 ```json
 {
   "mcpServers": {
     "tradingview": {
       "command": "node",
-      "args": ["C:/Users/YOU/tradingview-mcp/src/server.js"]
+      "args": ["/path/to/tradingview-mcp/src/server.js"]
     }
   }
 }
 ```
 
-Replace `C:/Users/YOU/tradingview-mcp` with your actual path.
+Replace `/path/to/tradingview-mcp` with your actual path.
 
 ### 4. Verify
 
 Ask Claude: *"Use tv_health_check to verify TradingView is connected"*
 
-## Tool Reference (55 tools)
+## Finding TradingView on Your System
 
-### Health & Discovery (3)
+The launch scripts and `tv_launch` tool auto-detect TradingView's install location. If auto-detection fails:
+
+| Platform | Common Locations |
+|----------|-----------------|
+| **Mac** | `/Applications/TradingView.app/Contents/MacOS/TradingView` |
+| **Windows** | `%LOCALAPPDATA%\TradingView\TradingView.exe`, `%PROGRAMFILES%\WindowsApps\TradingView*\TradingView.exe` |
+| **Linux** | `/opt/TradingView/tradingview`, `~/.local/share/TradingView/TradingView`, `/snap/tradingview/current/tradingview` |
+
+The key flag is `--remote-debugging-port=9222`. This enables Chrome DevTools Protocol which the MCP server connects to.
+
+## Tool Reference (68 tools)
+
+### Health & Launch (4)
 | Tool | What it does |
 |------|-------------|
 | `tv_health_check` | Verify CDP connection, get current symbol/timeframe |
 | `tv_discover` | Report available API paths and their methods |
 | `tv_ui_state` | Get current UI state — open panels, visible buttons |
+| `tv_launch` | Launch TradingView Desktop with CDP enabled (auto-detects install on Mac/Win/Linux) |
 
 ### Chart Control (10)
 | Tool | What it does |
@@ -102,7 +126,7 @@ Ask Claude: *"Use tv_health_check to verify TradingView is connected"*
 | `pine_open` | Open a saved script by name |
 | `pine_list_scripts` | List saved scripts from the editor dropdown |
 
-### Data Extraction (7)
+### Data Extraction (12)
 | Tool | What it does |
 |------|-------------|
 | `data_get_ohlcv` | Get OHLCV bar data (max 500 bars) |
@@ -112,6 +136,11 @@ Ask Claude: *"Use tv_health_check to verify TradingView is connected"*
 | `data_get_equity` | Get equity curve data |
 | `quote_get` | Get real-time quote — last, OHLC, volume |
 | `depth_get` | Get order book / DOM data |
+| **`data_get_pine_lines`** | **Extract price levels from Pine `line.new()` drawings** |
+| **`data_get_pine_labels`** | **Extract text + price from Pine `label.new()` drawings** |
+| **`data_get_pine_tables`** | **Extract table cell text from Pine `table.new()` drawings** |
+| **`data_get_pine_boxes`** | **Extract price boundaries from Pine `box.new()` drawings** |
+| **`data_get_study_values`** | **Get current values from all indicators via data window** |
 
 ### Indicators (2)
 | Tool | What it does |
@@ -155,12 +184,19 @@ Ask Claude: *"Use tv_health_check to verify TradingView is connected"*
 | `replay_trade` | Execute buy/sell/close in replay |
 | `replay_status` | Get replay state, position, P&L |
 
-### UI Control (5)
+### UI Control (12)
 | Tool | What it does |
 |------|-------------|
 | `ui_click` | Click any element by aria-label, data-name, text, or class |
 | `ui_open_panel` | Open/close/toggle panels (pine-editor, watchlist, etc.) |
 | `ui_fullscreen` | Toggle fullscreen |
+| `ui_evaluate` | Execute arbitrary JavaScript in the page context |
+| `ui_find_element` | Find UI elements by text, aria-label, or CSS selector |
+| `ui_hover` | Hover over a UI element |
+| `ui_keyboard` | Press keyboard keys or shortcuts |
+| `ui_mouse_click` | Click at specific x,y coordinates |
+| `ui_scroll` | Scroll the chart or page |
+| `ui_type_text` | Type text into focused input |
 | `layout_list` | List saved chart layouts |
 | `layout_switch` | Switch to a saved layout |
 
@@ -170,53 +206,65 @@ Ask Claude: *"Use tv_health_check to verify TradingView is connected"*
 | `watchlist_get` | Read watchlist — symbols, prices, changes |
 | `watchlist_add` | Add a symbol to the watchlist |
 
+## Pine Graphics Extraction
+
+The `data_get_pine_*` tools can read data from **any visible Pine Script indicator**, even protected/encrypted ones. They access TradingView's internal graphics pipeline:
+
+```
+study._graphics._primitivesCollection
+  .dwglines.get('lines').get(false)._primitivesDataById     → line prices (y1, y2)
+  .dwglabels.get('labels').get(false)._primitivesDataById    → label text + price
+  .dwgboxes.get('boxes').get(false)._primitivesDataById      → box boundaries
+  .dwgtablecells.get('tableCells')._primitivesDataById       → table cell text
+```
+
+**Requirements:**
+- The indicator must be **visible** on the chart (hidden studies don't receive graphics data from the server)
+- The indicator uses Pine's drawing functions (`line.new()`, `label.new()`, `box.new()`, `table.new()`)
+
+**Example — extract all levels from a custom profiler:**
+```
+"Use data_get_pine_lines to get all horizontal price levels"
+"Use data_get_pine_tables with study_filter 'Profiler' to read the session table"
+"Use data_get_pine_labels to get all text annotations with prices"
+```
+
 ## Example Workflows
+
+### Full Chart Analysis Report
+```
+"Get all indicator values with data_get_study_values, extract custom levels with
+data_get_pine_lines and data_get_pine_tables, pull 100 bars of OHLCV, and build
+me a confluence analysis report"
+```
 
 ### Pine Script Development
 ```
 "Write a Pine Script RSI divergence indicator, put it on the chart, and screenshot the result"
 ```
-Claude will: `pine_set_source` → `pine_smart_compile` → `pine_get_errors` → `capture_screenshot`
 
 ### Multi-Symbol Screening
 ```
 "Compare Bollinger Band squeeze across ES, NQ, YM, and RTY on the 15-minute chart"
 ```
-Claude will: `batch_run` across symbols with screenshot + indicator analysis
-
-### Chart Analysis
-```
-"Switch to AAPL daily, add a 200 EMA, scroll to January 2024, and screenshot"
-```
-Claude will: `chart_set_symbol` → `chart_set_timeframe` → `chart_manage_indicator` → `chart_scroll_to_date` → `capture_screenshot`
 
 ### Replay Practice
 ```
 "Start replay on ES 5-minute from March 1st, step through 20 bars, buy at a support level"
 ```
-Claude will: `replay_start` → `replay_step` (x20) → `replay_trade`
 
 ## Architecture
 
 ```
-Claude Code  ←→  MCP Server (stdio)  ←→  CDP (port 9222)  ←→  TradingView Desktop
+Claude Code  ←→  MCP Server (stdio)  ←→  CDP (port 9222)  ←→  TradingView Desktop (Electron)
 ```
 
 - **Transport**: MCP over stdio
 - **Connection**: Chrome DevTools Protocol on localhost:9222
 - **API access**: Direct paths to TradingView internals — no DOM scraping where avoidable
 - **Pine Editor**: Monaco accessed via React fiber tree traversal
+- **Pine Graphics**: Internal `_primitivesCollection` pipeline with `_primitivesDataById` Maps
 - **No dependencies** beyond `@modelcontextprotocol/sdk` and `chrome-remote-interface`
-
-## Pine Script Helper Scripts
-
-For efficient Pine Script editing:
-
-```bash
-node scripts/pine_pull.js    # Pull from TV editor → scripts/current.pine
-# ... edit scripts/current.pine locally ...
-node scripts/pine_push.js    # Push to TV editor + compile + report errors
-```
 
 ## Requirements
 

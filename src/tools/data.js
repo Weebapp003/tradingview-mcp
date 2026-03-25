@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { evaluate, evaluateAsync, KNOWN_PATHS } from '../connection.js';
 
 const MAX_OHLCV_BARS = 500;
@@ -18,7 +19,7 @@ export function registerDataTools(server) {
 
   // ── OHLCV Bar Data ──────────────────────────────────────────────────
   server.tool('data_get_ohlcv', 'Get OHLCV bar data from the chart', {
-    count: { type: 'number', description: 'Number of bars to retrieve (max 500)', default: 100 },
+    count: z.number().optional().describe('Number of bars to retrieve (max 500)'),
   }, async ({ count }) => {
     const limit = Math.min(count || 100, MAX_OHLCV_BARS);
     try {
@@ -66,7 +67,7 @@ export function registerDataTools(server) {
   // ── Indicator / Study Values ────────────────────────────────────────
   // Note: exportData() is not supported in TV Desktop. We use getStudyById() instead.
   server.tool('data_get_indicator', 'Get indicator/study info and input values', {
-    entity_id: { type: 'string', description: 'Study entity ID (from chart_get_state)' },
+    entity_id: z.string().describe('Study entity ID (from chart_get_state)'),
   }, async ({ entity_id }) => {
     try {
       const data = await evaluate(`
@@ -177,7 +178,7 @@ export function registerDataTools(server) {
 
   // ── Trade List ──────────────────────────────────────────────────────
   server.tool('data_get_trades', 'Get trade list from Strategy Tester', {
-    max_trades: { type: 'number', description: 'Maximum trades to return', default: 20 },
+    max_trades: z.number().optional().describe('Maximum trades to return'),
   }, async ({ max_trades }) => {
     const limit = Math.min(max_trades || 20, MAX_TRADES);
     try {
@@ -297,7 +298,7 @@ export function registerDataTools(server) {
 
   // ── Real-Time Quote ─────────────────────────────────────────────────
   server.tool('quote_get', 'Get real-time quote data for a symbol (price, OHLC, volume)', {
-    symbol: { type: 'string', description: 'Symbol to quote (blank = current chart symbol)', default: '' },
+    symbol: z.string().optional().describe('Symbol to quote (blank = current chart symbol)'),
   }, async ({ symbol }) => {
     try {
       const data = await evaluate(`
@@ -469,6 +470,362 @@ export function registerDataTools(server) {
         raw_values: data.raw_values,
         note: data.note,
       });
+    } catch (err) {
+      return jsonResult({ success: false, error: err.message }, true);
+    }
+  });
+
+  // ── Pine Graphics Extraction (line.new / label.new / box.new / table.new) ──
+  // These use TradingView's internal graphics pipeline:
+  //   study._graphics._primitivesCollection.dwglines.get('lines').get(false)._primitivesDataById
+  // The inner Map key is the boolean `false`. Only visible studies have data.
+
+  server.tool('data_get_pine_lines', 'Extract horizontal price levels from Pine Script line.new() drawings across all visible indicators. Returns y1/y2 prices for every line drawn by custom indicators.', {
+    study_filter: z.string().optional().describe('Substring to filter study names (e.g., "Profiler", "NY Levels"). Omit for all studies.'),
+    max_lines: z.number().optional().describe('Max lines to return per study (default 100)'),
+  }, async ({ study_filter, max_lines }) => {
+    const limit = max_lines || 100;
+    const filter = study_filter || '';
+    try {
+      const data = await evaluate(`
+        (function() {
+          var chart = window.TradingViewApi._activeChartWidgetWV.value()._chartWidget;
+          var model = chart.model();
+          var sources = model.model().dataSources();
+          var results = [];
+          var filter = '${filter}';
+
+          for (var si = 0; si < sources.length; si++) {
+            var s = sources[si];
+            if (!s.metaInfo) continue;
+            try {
+              var meta = s.metaInfo();
+              var name = meta.description || meta.shortDescription || '';
+              if (!name) continue;
+              if (filter && name.indexOf(filter) === -1) continue;
+
+              var g = s._graphics;
+              if (!g || !g._primitivesCollection) continue;
+              var pc = g._primitivesCollection;
+
+              var lines = [];
+              try {
+                var dwglines = pc.dwglines;
+                if (dwglines) {
+                  var linesMap = dwglines.get('lines');
+                  if (linesMap) {
+                    var coll = linesMap.get(false);
+                    if (coll && coll._primitivesDataById && coll._primitivesDataById.size > 0) {
+                      coll._primitivesDataById.forEach(function(v, id) {
+                        if (lines.length < ${limit}) {
+                          lines.push({
+                            id: id,
+                            y1: v.y1 != null ? Math.round(v.y1 * 100) / 100 : null,
+                            y2: v.y2 != null ? Math.round(v.y2 * 100) / 100 : null,
+                            x1: v.x1, x2: v.x2,
+                            horizontal: v.y1 === v.y2,
+                            style: v.st, width: v.w, extend: v.ex, color: v.ci
+                          });
+                        }
+                      });
+                    }
+                  }
+                }
+              } catch(e) {}
+
+              if (lines.length > 0) {
+                var hlines = lines.filter(function(l) { return l.horizontal && l.y1 != null; });
+                var prices = [];
+                var seen = {};
+                for (var i = 0; i < hlines.length; i++) {
+                  if (!seen[hlines[i].y1]) { prices.push(hlines[i].y1); seen[hlines[i].y1] = true; }
+                }
+                prices.sort(function(a, b) { return b - a; });
+
+                results.push({
+                  name: name,
+                  total_lines: lines.length,
+                  horizontal_levels: prices,
+                  all_lines: lines
+                });
+              }
+            } catch(e) {}
+          }
+          return results;
+        })()
+      `);
+
+      return jsonResult({ success: true, study_count: data?.length || 0, studies: data || [] });
+    } catch (err) {
+      return jsonResult({ success: false, error: err.message }, true);
+    }
+  });
+
+  server.tool('data_get_pine_labels', 'Extract text labels from Pine Script label.new() drawings across all visible indicators. Returns label text, price (y), and position.', {
+    study_filter: z.string().optional().describe('Substring to filter study names. Omit for all studies.'),
+    max_labels: z.number().optional().describe('Max labels to return per study (default 100)'),
+  }, async ({ study_filter, max_labels }) => {
+    const limit = max_labels || 100;
+    const filter = study_filter || '';
+    try {
+      const data = await evaluate(`
+        (function() {
+          var chart = window.TradingViewApi._activeChartWidgetWV.value()._chartWidget;
+          var model = chart.model();
+          var sources = model.model().dataSources();
+          var results = [];
+          var filter = '${filter}';
+
+          for (var si = 0; si < sources.length; si++) {
+            var s = sources[si];
+            if (!s.metaInfo) continue;
+            try {
+              var meta = s.metaInfo();
+              var name = meta.description || meta.shortDescription || '';
+              if (!name) continue;
+              if (filter && name.indexOf(filter) === -1) continue;
+
+              var g = s._graphics;
+              if (!g || !g._primitivesCollection) continue;
+              var pc = g._primitivesCollection;
+
+              var labels = [];
+              try {
+                var dwglabels = pc.dwglabels;
+                if (dwglabels) {
+                  var labelsMap = dwglabels.get('labels');
+                  if (labelsMap) {
+                    var coll = labelsMap.get(false);
+                    if (coll && coll._primitivesDataById && coll._primitivesDataById.size > 0) {
+                      coll._primitivesDataById.forEach(function(v, id) {
+                        if (labels.length < ${limit}) {
+                          labels.push({
+                            id: id,
+                            text: v.t || '',
+                            y: v.y != null ? Math.round(v.y * 100) / 100 : null,
+                            x: v.x,
+                            yloc: v.yl, size: v.sz,
+                            textColor: v.tci, color: v.ci, textAlign: v.ta
+                          });
+                        }
+                      });
+                    }
+                  }
+                }
+              } catch(e) {}
+
+              if (labels.length > 0) {
+                results.push({ name: name, total_labels: labels.length, labels: labels });
+              }
+            } catch(e) {}
+          }
+          return results;
+        })()
+      `);
+
+      return jsonResult({ success: true, study_count: data?.length || 0, studies: data || [] });
+    } catch (err) {
+      return jsonResult({ success: false, error: err.message }, true);
+    }
+  });
+
+  server.tool('data_get_pine_tables', 'Extract table data from Pine Script table.new() drawings across all visible indicators. Returns cell text organized by table, row, and column.', {
+    study_filter: z.string().optional().describe('Substring to filter study names. Omit for all studies.'),
+  }, async ({ study_filter }) => {
+    const filter = study_filter || '';
+    try {
+      const data = await evaluate(`
+        (function() {
+          var chart = window.TradingViewApi._activeChartWidgetWV.value()._chartWidget;
+          var model = chart.model();
+          var sources = model.model().dataSources();
+          var results = [];
+          var filter = '${filter}';
+
+          for (var si = 0; si < sources.length; si++) {
+            var s = sources[si];
+            if (!s.metaInfo) continue;
+            try {
+              var meta = s.metaInfo();
+              var name = meta.description || meta.shortDescription || '';
+              if (!name) continue;
+              if (filter && name.indexOf(filter) === -1) continue;
+
+              var g = s._graphics;
+              if (!g || !g._primitivesCollection) continue;
+              var pc = g._primitivesCollection;
+
+              var cells = [];
+              try {
+                var dwgtc = pc.dwgtablecells;
+                if (dwgtc) {
+                  var cellsColl = dwgtc.get('tableCells');
+                  if (cellsColl && cellsColl._primitivesDataById && cellsColl._primitivesDataById.size > 0) {
+                    cellsColl._primitivesDataById.forEach(function(v, id) {
+                      cells.push({
+                        id: id, text: v.t || '', row: v.row, col: v.col,
+                        tableId: v.tid, textColor: v.tc, bgColor: v.bgc
+                      });
+                    });
+                  }
+                }
+              } catch(e) {}
+
+              if (cells.length > 0) {
+                // Group cells by tableId and format as rows
+                var tables = {};
+                for (var ci = 0; ci < cells.length; ci++) {
+                  var c = cells[ci];
+                  var tid = c.tableId || 0;
+                  if (!tables[tid]) tables[tid] = { id: tid, cells: [], rows: {} };
+                  tables[tid].cells.push(c);
+                  if (!tables[tid].rows[c.row]) tables[tid].rows[c.row] = {};
+                  tables[tid].rows[c.row][c.col] = c.text;
+                }
+
+                // Convert rows object to sorted array
+                var tableList = [];
+                for (var tid in tables) {
+                  var t = tables[tid];
+                  var rowArr = [];
+                  var rowNums = Object.keys(t.rows).map(Number).sort(function(a,b){return a-b;});
+                  for (var ri = 0; ri < rowNums.length; ri++) {
+                    var rowData = t.rows[rowNums[ri]];
+                    var colNums = Object.keys(rowData).map(Number).sort(function(a,b){return a-b;});
+                    var rowText = [];
+                    for (var ci2 = 0; ci2 < colNums.length; ci2++) {
+                      var txt = rowData[colNums[ci2]];
+                      if (txt) rowText.push(txt);
+                    }
+                    if (rowText.length > 0) rowArr.push(rowText.join(' | '));
+                  }
+                  tableList.push({ tableId: Number(tid), row_count: rowNums.length, formatted_rows: rowArr });
+                }
+
+                results.push({ name: name, total_cells: cells.length, tables: tableList });
+              }
+            } catch(e) {}
+          }
+          return results;
+        })()
+      `);
+
+      return jsonResult({ success: true, study_count: data?.length || 0, studies: data || [] });
+    } catch (err) {
+      return jsonResult({ success: false, error: err.message }, true);
+    }
+  });
+
+  server.tool('data_get_pine_boxes', 'Extract box/rectangle data from Pine Script box.new() drawings across all visible indicators. Returns y1/y2 price boundaries.', {
+    study_filter: z.string().optional().describe('Substring to filter study names. Omit for all studies.'),
+    max_boxes: z.number().optional().describe('Max boxes to return per study (default 50)'),
+  }, async ({ study_filter, max_boxes }) => {
+    const limit = max_boxes || 50;
+    const filter = study_filter || '';
+    try {
+      const data = await evaluate(`
+        (function() {
+          var chart = window.TradingViewApi._activeChartWidgetWV.value()._chartWidget;
+          var model = chart.model();
+          var sources = model.model().dataSources();
+          var results = [];
+          var filter = '${filter}';
+
+          for (var si = 0; si < sources.length; si++) {
+            var s = sources[si];
+            if (!s.metaInfo) continue;
+            try {
+              var meta = s.metaInfo();
+              var name = meta.description || meta.shortDescription || '';
+              if (!name) continue;
+              if (filter && name.indexOf(filter) === -1) continue;
+
+              var g = s._graphics;
+              if (!g || !g._primitivesCollection) continue;
+              var pc = g._primitivesCollection;
+
+              var boxes = [];
+              try {
+                var dwgboxes = pc.dwgboxes;
+                if (dwgboxes) {
+                  var boxesMap = dwgboxes.get('boxes');
+                  if (boxesMap) {
+                    var coll = boxesMap.get(false);
+                    if (coll && coll._primitivesDataById && coll._primitivesDataById.size > 0) {
+                      coll._primitivesDataById.forEach(function(v, id) {
+                        if (boxes.length < ${limit}) {
+                          boxes.push({
+                            id: id,
+                            y1: v.y1 != null ? Math.round(v.y1 * 100) / 100 : null,
+                            y2: v.y2 != null ? Math.round(v.y2 * 100) / 100 : null,
+                            x1: v.x1, x2: v.x2,
+                            borderColor: v.c, bgColor: v.bc
+                          });
+                        }
+                      });
+                    }
+                  }
+                }
+              } catch(e) {}
+
+              if (boxes.length > 0) {
+                results.push({ name: name, total_boxes: boxes.length, boxes: boxes });
+              }
+            } catch(e) {}
+          }
+          return results;
+        })()
+      `);
+
+      return jsonResult({ success: true, study_count: data?.length || 0, studies: data || [] });
+    } catch (err) {
+      return jsonResult({ success: false, error: err.message }, true);
+    }
+  });
+
+  server.tool('data_get_study_values', 'Get current indicator values from the data window for all visible studies. Works for standard indicators (RSI, MACD, Bollinger Bands, EMAs, etc.) and any Pine indicator that uses plot() with visible display.', {}, async () => {
+    try {
+      const data = await evaluate(`
+        (function() {
+          var chart = window.TradingViewApi._activeChartWidgetWV.value()._chartWidget;
+          var model = chart.model();
+          var sources = model.model().dataSources();
+          var results = [];
+
+          for (var si = 0; si < sources.length; si++) {
+            var s = sources[si];
+            if (!s.metaInfo) continue;
+            try {
+              var meta = s.metaInfo();
+              var name = meta.description || meta.shortDescription || '';
+              if (!name) continue;
+
+              var values = {};
+              try {
+                var dwv = s.dataWindowView();
+                if (dwv) {
+                  var items = dwv.items();
+                  if (items) {
+                    for (var i = 0; i < items.length; i++) {
+                      var item = items[i];
+                      if (item._value && item._value !== '∅' && item._title) {
+                        values[item._title] = item._value;
+                      }
+                    }
+                  }
+                }
+              } catch(e) {}
+
+              if (Object.keys(values).length > 0) {
+                results.push({ name: name, values: values });
+              }
+            } catch(e) {}
+          }
+          return results;
+        })()
+      `);
+
+      return jsonResult({ success: true, study_count: data?.length || 0, studies: data || [] });
     } catch (err) {
       return jsonResult({ success: false, error: err.message }, true);
     }
