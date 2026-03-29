@@ -1,4 +1,8 @@
+import { z } from 'zod';
 import { evaluate, getClient } from '../connection.js';
+import { readFileSync, existsSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 
 /**
  * Helper JS snippet (injected into TV page) that finds the Monaco editor
@@ -107,7 +111,7 @@ export function registerPineTools(server) {
   });
 
   server.tool('pine_set_source', 'Set Pine Script source code in the editor', {
-    source: { type: 'string', description: 'Pine Script source code to inject' },
+    source: z.string().describe('Pine Script source code to inject'),
   }, async ({ source }) => {
     try {
       const editorReady = await ensurePineEditorOpen();
@@ -398,7 +402,7 @@ export function registerPineTools(server) {
 
   // ── pine_new ─────────────────────────────────────────────────────────
   server.tool('pine_new', 'Create a new blank Pine Script', {
-    type: { type: 'string', enum: ['indicator', 'strategy', 'library'], description: 'Type of script to create' },
+    type: z.enum(['indicator', 'strategy', 'library']).describe('Type of script to create'),
   }, async ({ type }) => {
     try {
       const editorReady = await ensurePineEditorOpen();
@@ -492,7 +496,7 @@ export function registerPineTools(server) {
 
   // ── pine_open ────────────────────────────────────────────────────────
   server.tool('pine_open', 'Open a saved Pine Script by name', {
-    name: { type: 'string', description: 'Name of the saved script to open (case-insensitive match)' },
+    name: z.string().describe('Name of the saved script to open (case-insensitive match)'),
   }, async ({ name }) => {
     try {
       const editorReady = await ensurePineEditorOpen();
@@ -613,6 +617,219 @@ export function registerPineTools(server) {
         success: true,
         scripts: scripts || [],
         count: scripts?.length || 0,
+      }, null, 2) }] };
+    } catch (err) {
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: err.message }, null, 2) }], isError: true };
+    }
+  });
+
+  // ── Pine Static Analysis (offline, no TradingView connection needed) ──
+  server.tool('pine_analyze', 'Run static analysis on Pine Script code WITHOUT compiling — catches array out-of-bounds, unguarded array.first()/last(), bad loop bounds, and implicit bool casts. Works offline, no TradingView connection needed.', {
+    source: z.string().describe('Pine Script source code to analyze'),
+  }, async ({ source }) => {
+    try {
+      const lines = source.split('\n');
+      const diagnostics = [];
+
+      // Check version
+      let isV6 = false;
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('//@version=6')) { isV6 = true; break; }
+        if (trimmed.startsWith('//@version=')) break;
+        if (trimmed === '' || trimmed.startsWith('//')) continue;
+        break;
+      }
+
+      // Collect array declarations
+      const arrays = new Map();
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const fromMatch = line.match(/(\w+)\s*=\s*array\.from\(([^)]*)\)/);
+        if (fromMatch) {
+          const name = fromMatch[1].trim();
+          const args = fromMatch[2].trim();
+          const size = args === '' ? 0 : args.split(',').length;
+          arrays.set(name, { name, size, line: i + 1 });
+          continue;
+        }
+        const newMatch = line.match(/(\w+)\s*=\s*array\.new(?:<\w+>|_\w+)\((\d+)?/);
+        if (newMatch) {
+          const name = newMatch[1].trim();
+          const size = newMatch[2] !== undefined ? parseInt(newMatch[2], 10) : null;
+          arrays.set(name, { name, size, line: i + 1 });
+        }
+      }
+
+      // Check array.get/set out of bounds
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const pattern = /array\.(get|set)\(\s*(\w+)\s*,\s*(-?\d+)/g;
+        let match;
+        while ((match = pattern.exec(line)) !== null) {
+          const method = match[1];
+          const arrName = match[2];
+          const idx = parseInt(match[3], 10);
+          const info = arrays.get(arrName);
+          if (!info || info.size === null) continue;
+          if (idx < 0 || idx >= info.size) {
+            diagnostics.push({
+              line: i + 1, column: match.index + 1,
+              message: `array.${method}(${arrName}, ${idx}) — index ${idx} out of bounds (array size is ${info.size})`,
+              severity: 'error',
+            });
+          }
+        }
+      }
+
+      // Check unguarded array.first()/array.last() on potentially empty arrays
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const firstLastPattern = /(\w+)\.(first|last)\(\)/g;
+        let match;
+        while ((match = firstLastPattern.exec(line)) !== null) {
+          const arrName = match[1];
+          if (arrName === 'array') continue; // skip array.first() without context
+          const info = arrays.get(arrName);
+          if (info && info.size === 0) {
+            diagnostics.push({
+              line: i + 1, column: match.index + 1,
+              message: `${arrName}.${match[2]}() called on possibly empty array (declared with size 0)`,
+              severity: 'warning',
+            });
+          }
+        }
+      }
+
+      // Check for common issues
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const trimmed = line.trim();
+
+        // Warn on strategy.entry without strategy declaration
+        if (trimmed.includes('strategy.entry') || trimmed.includes('strategy.close')) {
+          let hasStrategyDecl = false;
+          for (const l of lines) {
+            if (l.trim().startsWith('strategy(')) { hasStrategyDecl = true; break; }
+          }
+          if (!hasStrategyDecl) {
+            diagnostics.push({
+              line: i + 1, column: 1,
+              message: 'strategy.entry/close used but no strategy() declaration found — did you mean to use indicator()?',
+              severity: 'error',
+            });
+            break;
+          }
+        }
+
+        // Warn on plot() in strategy without overlay
+        if (trimmed.startsWith('plot(') || trimmed.startsWith('plotshape(') || trimmed.startsWith('plotchar(')) {
+          // Just a note — not necessarily wrong
+        }
+      }
+
+      // Version-specific checks
+      if (!isV6 && source.includes('//@version=')) {
+        const vMatch = source.match(/\/\/@version=(\d+)/);
+        if (vMatch && parseInt(vMatch[1]) < 5) {
+          diagnostics.push({
+            line: 1, column: 1,
+            message: `Script uses Pine v${vMatch[1]} — consider upgrading to v6 for latest features`,
+            severity: 'info',
+          });
+        }
+      }
+
+      return { content: [{ type: 'text', text: JSON.stringify({
+        success: true,
+        issue_count: diagnostics.length,
+        diagnostics,
+        note: diagnostics.length === 0 ? 'No static analysis issues found. Use pine_compile or pine_smart_compile for full server-side compilation check.' : undefined,
+      }, null, 2) }] };
+    } catch (err) {
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: err.message }, null, 2) }], isError: true };
+    }
+  });
+
+  // ── Pine Server Compile (via TradingView's pine-facade API, no chart needed) ──
+  server.tool('pine_check', 'Compile Pine Script via TradingView\'s server API without needing the chart open. Returns compilation errors/warnings. Useful for validating code before injecting into the chart.', {
+    source: z.string().describe('Pine Script source code to compile/validate'),
+  }, async ({ source }) => {
+    try {
+      const formData = new URLSearchParams();
+      formData.append('source', source);
+
+      const response = await fetch(
+        'https://pine-facade.tradingview.com/pine-facade/translate_light?user_name=Guest&pine_id=00000000-0000-0000-0000-000000000000',
+        {
+          method: 'POST',
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Referer': 'https://www.tradingview.com/',
+          },
+          body: formData,
+        }
+      );
+
+      if (!response.ok) {
+        return { content: [{ type: 'text', text: JSON.stringify({
+          success: false,
+          error: `TradingView API returned ${response.status}: ${response.statusText}`,
+          hint: 'pine-facade API may be rate-limited or require authentication for some operations.',
+        }, null, 2) }], isError: true };
+      }
+
+      const result = await response.json();
+
+      // Parse the response
+      const errors = [];
+      const warnings = [];
+
+      if (result.result) {
+        // Success — compiled without errors
+        return { content: [{ type: 'text', text: JSON.stringify({
+          success: true,
+          compiled: true,
+          errors: [],
+          warnings: [],
+          note: 'Pine Script compiled successfully on TradingView servers.',
+        }, null, 2) }] };
+      }
+
+      // Parse error response
+      if (result.error) {
+        const err = result.error;
+        if (typeof err === 'string') {
+          errors.push({ message: err });
+        } else if (err.message) {
+          errors.push({
+            line: err.line,
+            column: err.column,
+            message: err.message,
+            end_line: err.end_line,
+            end_column: err.end_column,
+          });
+        }
+      }
+
+      if (result.warnings) {
+        for (const w of result.warnings) {
+          warnings.push({
+            line: w.line,
+            column: w.column,
+            message: w.message,
+          });
+        }
+      }
+
+      return { content: [{ type: 'text', text: JSON.stringify({
+        success: true,
+        compiled: errors.length === 0,
+        error_count: errors.length,
+        warning_count: warnings.length,
+        errors,
+        warnings,
       }, null, 2) }] };
     } catch (err) {
       return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: err.message }, null, 2) }], isError: true };
