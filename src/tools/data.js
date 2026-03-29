@@ -625,15 +625,17 @@ export function registerDataTools(server) {
 
   server.tool('data_get_pine_labels', 'Read text labels drawn by Pine Script indicators (label.new). Returns text and price pairs. Use study_filter to target a specific indicator.', {
     study_filter: z.string().optional().describe('Substring to match study name. Omit for all.'),
+    max_labels: z.number().optional().describe('Max labels per study (default 50). Set higher if you need all.'),
     verbose: z.boolean().optional().describe('Return raw label data with IDs, colors, positions (default false — returns only text + price)'),
-  }, async ({ study_filter, verbose }) => {
+  }, async ({ study_filter, max_labels, verbose }) => {
     const filter = study_filter || '';
     try {
       const raw = await evaluate(buildGraphicsJS('dwglabels', 'labels', filter));
       if (!raw || raw.length === 0) return jsonResult({ success: true, study_count: 0, studies: [] });
 
+      const limit = max_labels || 50;
       const studies = raw.map(s => {
-        const labels = s.items.map(item => {
+        let labels = s.items.map(item => {
           const v = item.raw;
           const text = v.t || '';
           const price = v.y != null ? Math.round(v.y * 100) / 100 : null;
@@ -643,7 +645,10 @@ export function registerDataTools(server) {
           return { text, price };
         }).filter(l => l.text || l.price != null);
 
-        return { name: s.name, total_labels: s.count, labels };
+        // Cap to most recent labels (last N items from Pine's drawing order)
+        if (labels.length > limit) labels = labels.slice(-limit);
+
+        return { name: s.name, total_labels: s.count, showing: labels.length, labels };
       });
 
       return jsonResult({ success: true, study_count: studies.length, studies });
