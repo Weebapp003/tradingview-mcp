@@ -18,9 +18,10 @@ function jsonResult(obj, isError = false) {
 export function registerDataTools(server) {
 
   // ── OHLCV Bar Data ──────────────────────────────────────────────────
-  server.tool('data_get_ohlcv', 'Get OHLCV bar data from the chart', {
-    count: z.number().optional().describe('Number of bars to retrieve (max 500)'),
-  }, async ({ count }) => {
+  server.tool('data_get_ohlcv', 'Get OHLCV bar data from the chart. Use summary=true for compact stats instead of all bars (saves context).', {
+    count: z.number().optional().describe('Number of bars to retrieve (max 500, default 100)'),
+    summary: z.boolean().optional().describe('Return summary stats (high, low, open, close, avg volume, range) instead of all bars — much smaller output'),
+  }, async ({ count, summary }) => {
     const limit = Math.min(count || 100, MAX_OHLCV_BARS);
     try {
       let data;
@@ -50,6 +51,31 @@ export function registerDataTools(server) {
 
       if (!data || !data.bars || data.bars.length === 0) {
         return jsonResult({ success: false, error: 'Could not extract OHLCV data. The chart may still be loading.' }, true);
+      }
+
+      // Summary mode: return compact stats instead of all bars
+      if (summary) {
+        const bars = data.bars;
+        const closes = bars.map(b => b.close);
+        const highs = bars.map(b => b.high);
+        const lows = bars.map(b => b.low);
+        const volumes = bars.map(b => b.volume);
+        const first = bars[0];
+        const last = bars[bars.length - 1];
+        return jsonResult({
+          success: true,
+          bar_count: bars.length,
+          period: { from: first.time, to: last.time },
+          open: first.open,
+          close: last.close,
+          high: Math.max(...highs),
+          low: Math.min(...lows),
+          range: Math.round((Math.max(...highs) - Math.min(...lows)) * 100) / 100,
+          change: Math.round((last.close - first.open) * 100) / 100,
+          change_pct: Math.round(((last.close - first.open) / first.open) * 10000) / 100 + '%',
+          avg_volume: Math.round(volumes.reduce((a, b) => a + b, 0) / volumes.length),
+          last_5_bars: bars.slice(-5),
+        });
       }
 
       return jsonResult({
@@ -88,11 +114,21 @@ export function registerDataTools(server) {
         return jsonResult({ success: false, error: data.error }, true);
       }
 
+      // Filter out encrypted/encoded input blobs (huge base64 strings) to save context
+      let inputs = data?.inputs;
+      if (Array.isArray(inputs)) {
+        inputs = inputs.filter(inp => {
+          if (inp.id === 'text' && typeof inp.value === 'string' && inp.value.length > 200) return false;
+          if (typeof inp.value === 'string' && inp.value.length > 500) return false;
+          return true;
+        });
+      }
+
       return jsonResult({
         success: true,
         entity_id,
         visible: data?.visible,
-        inputs: data?.inputs,
+        inputs,
       });
     } catch (err) {
       return jsonResult({ success: false, error: err.message }, true);
@@ -475,315 +511,227 @@ export function registerDataTools(server) {
     }
   });
 
-  // ── Pine Graphics Extraction (line.new / label.new / box.new / table.new) ──
-  // These use TradingView's internal graphics pipeline:
-  //   study._graphics._primitivesCollection.dwglines.get('lines').get(false)._primitivesDataById
-  // The inner Map key is the boolean `false`. Only visible studies have data.
+  // ── Pine Graphics — Shared helper for accessing _primitivesCollection ──
+  // Path: study._graphics._primitivesCollection.dwglines.get('lines').get(false)._primitivesDataById
+  // The inner Map key is the boolean `false`. Only visible studies receive data from the server.
+  //
+  // CONTEXT OPTIMIZATION: By default, tools return compact summaries (deduplicated prices,
+  // text-only labels, formatted table rows). Pass verbose=true for raw data with IDs/colors/coords.
 
-  server.tool('data_get_pine_lines', 'Extract horizontal price levels from Pine Script line.new() drawings across all visible indicators. Returns y1/y2 prices for every line drawn by custom indicators.', {
-    study_filter: z.string().optional().describe('Substring to filter study names (e.g., "Profiler", "NY Levels"). Omit for all studies.'),
-    max_lines: z.number().optional().describe('Max lines to return per study (default 100)'),
-  }, async ({ study_filter, max_lines }) => {
-    const limit = max_lines || 100;
-    const filter = study_filter || '';
-    try {
-      const data = await evaluate(`
-        (function() {
-          var chart = window.TradingViewApi._activeChartWidgetWV.value()._chartWidget;
-          var model = chart.model();
-          var sources = model.model().dataSources();
-          var results = [];
-          var filter = '${filter}';
+  function buildGraphicsJS(collectionName, mapKey, filter, extractFn) {
+    return `
+      (function() {
+        var chart = window.TradingViewApi._activeChartWidgetWV.value()._chartWidget;
+        var model = chart.model();
+        var sources = model.model().dataSources();
+        var results = [];
+        var filter = '${filter}';
 
-          for (var si = 0; si < sources.length; si++) {
-            var s = sources[si];
-            if (!s.metaInfo) continue;
+        for (var si = 0; si < sources.length; si++) {
+          var s = sources[si];
+          if (!s.metaInfo) continue;
+          try {
+            var meta = s.metaInfo();
+            var name = meta.description || meta.shortDescription || '';
+            if (!name) continue;
+            if (filter && name.indexOf(filter) === -1) continue;
+
+            var g = s._graphics;
+            if (!g || !g._primitivesCollection) continue;
+            var pc = g._primitivesCollection;
+
+            var items = [];
             try {
-              var meta = s.metaInfo();
-              var name = meta.description || meta.shortDescription || '';
-              if (!name) continue;
-              if (filter && name.indexOf(filter) === -1) continue;
-
-              var g = s._graphics;
-              if (!g || !g._primitivesCollection) continue;
-              var pc = g._primitivesCollection;
-
-              var lines = [];
-              try {
-                var dwglines = pc.dwglines;
-                if (dwglines) {
-                  var linesMap = dwglines.get('lines');
-                  if (linesMap) {
-                    var coll = linesMap.get(false);
-                    if (coll && coll._primitivesDataById && coll._primitivesDataById.size > 0) {
-                      coll._primitivesDataById.forEach(function(v, id) {
-                        if (lines.length < ${limit}) {
-                          lines.push({
-                            id: id,
-                            y1: v.y1 != null ? Math.round(v.y1 * 100) / 100 : null,
-                            y2: v.y2 != null ? Math.round(v.y2 * 100) / 100 : null,
-                            x1: v.x1, x2: v.x2,
-                            horizontal: v.y1 === v.y2,
-                            style: v.st, width: v.w, extend: v.ex, color: v.ci
-                          });
-                        }
-                      });
-                    }
+              var outer = pc.${collectionName};
+              if (outer) {
+                var inner = outer.get('${mapKey}');
+                if (inner) {
+                  var coll = inner.get(false);
+                  if (coll && coll._primitivesDataById && coll._primitivesDataById.size > 0) {
+                    coll._primitivesDataById.forEach(function(v, id) {
+                      items.push({id: id, raw: v});
+                    });
                   }
                 }
-              } catch(e) {}
-
-              if (lines.length > 0) {
-                var hlines = lines.filter(function(l) { return l.horizontal && l.y1 != null; });
-                var prices = [];
-                var seen = {};
-                for (var i = 0; i < hlines.length; i++) {
-                  if (!seen[hlines[i].y1]) { prices.push(hlines[i].y1); seen[hlines[i].y1] = true; }
-                }
-                prices.sort(function(a, b) { return b - a; });
-
-                results.push({
-                  name: name,
-                  total_lines: lines.length,
-                  horizontal_levels: prices,
-                  all_lines: lines
-                });
               }
             } catch(e) {}
-          }
-          return results;
-        })()
-      `);
 
-      return jsonResult({ success: true, study_count: data?.length || 0, studies: data || [] });
-    } catch (err) {
-      return jsonResult({ success: false, error: err.message }, true);
-    }
-  });
-
-  server.tool('data_get_pine_labels', 'Extract text labels from Pine Script label.new() drawings across all visible indicators. Returns label text, price (y), and position.', {
-    study_filter: z.string().optional().describe('Substring to filter study names. Omit for all studies.'),
-    max_labels: z.number().optional().describe('Max labels to return per study (default 100)'),
-  }, async ({ study_filter, max_labels }) => {
-    const limit = max_labels || 100;
-    const filter = study_filter || '';
-    try {
-      const data = await evaluate(`
-        (function() {
-          var chart = window.TradingViewApi._activeChartWidgetWV.value()._chartWidget;
-          var model = chart.model();
-          var sources = model.model().dataSources();
-          var results = [];
-          var filter = '${filter}';
-
-          for (var si = 0; si < sources.length; si++) {
-            var s = sources[si];
-            if (!s.metaInfo) continue;
-            try {
-              var meta = s.metaInfo();
-              var name = meta.description || meta.shortDescription || '';
-              if (!name) continue;
-              if (filter && name.indexOf(filter) === -1) continue;
-
-              var g = s._graphics;
-              if (!g || !g._primitivesCollection) continue;
-              var pc = g._primitivesCollection;
-
-              var labels = [];
+            // tableCells uses a different nesting — no .get(false) layer
+            if (items.length === 0 && '${collectionName}' === 'dwgtablecells') {
               try {
-                var dwglabels = pc.dwglabels;
-                if (dwglabels) {
-                  var labelsMap = dwglabels.get('labels');
-                  if (labelsMap) {
-                    var coll = labelsMap.get(false);
-                    if (coll && coll._primitivesDataById && coll._primitivesDataById.size > 0) {
-                      coll._primitivesDataById.forEach(function(v, id) {
-                        if (labels.length < ${limit}) {
-                          labels.push({
-                            id: id,
-                            text: v.t || '',
-                            y: v.y != null ? Math.round(v.y * 100) / 100 : null,
-                            x: v.x,
-                            yloc: v.yl, size: v.sz,
-                            textColor: v.tci, color: v.ci, textAlign: v.ta
-                          });
-                        }
-                      });
-                    }
-                  }
-                }
-              } catch(e) {}
-
-              if (labels.length > 0) {
-                results.push({ name: name, total_labels: labels.length, labels: labels });
-              }
-            } catch(e) {}
-          }
-          return results;
-        })()
-      `);
-
-      return jsonResult({ success: true, study_count: data?.length || 0, studies: data || [] });
-    } catch (err) {
-      return jsonResult({ success: false, error: err.message }, true);
-    }
-  });
-
-  server.tool('data_get_pine_tables', 'Extract table data from Pine Script table.new() drawings across all visible indicators. Returns cell text organized by table, row, and column.', {
-    study_filter: z.string().optional().describe('Substring to filter study names. Omit for all studies.'),
-  }, async ({ study_filter }) => {
-    const filter = study_filter || '';
-    try {
-      const data = await evaluate(`
-        (function() {
-          var chart = window.TradingViewApi._activeChartWidgetWV.value()._chartWidget;
-          var model = chart.model();
-          var sources = model.model().dataSources();
-          var results = [];
-          var filter = '${filter}';
-
-          for (var si = 0; si < sources.length; si++) {
-            var s = sources[si];
-            if (!s.metaInfo) continue;
-            try {
-              var meta = s.metaInfo();
-              var name = meta.description || meta.shortDescription || '';
-              if (!name) continue;
-              if (filter && name.indexOf(filter) === -1) continue;
-
-              var g = s._graphics;
-              if (!g || !g._primitivesCollection) continue;
-              var pc = g._primitivesCollection;
-
-              var cells = [];
-              try {
-                var dwgtc = pc.dwgtablecells;
-                if (dwgtc) {
-                  var cellsColl = dwgtc.get('tableCells');
-                  if (cellsColl && cellsColl._primitivesDataById && cellsColl._primitivesDataById.size > 0) {
-                    cellsColl._primitivesDataById.forEach(function(v, id) {
-                      cells.push({
-                        id: id, text: v.t || '', row: v.row, col: v.col,
-                        tableId: v.tid, textColor: v.tc, bgColor: v.bgc
-                      });
+                var tcOuter = pc.dwgtablecells;
+                if (tcOuter) {
+                  var tcColl = tcOuter.get('tableCells');
+                  if (tcColl && tcColl._primitivesDataById && tcColl._primitivesDataById.size > 0) {
+                    tcColl._primitivesDataById.forEach(function(v, id) {
+                      items.push({id: id, raw: v});
                     });
                   }
                 }
               } catch(e) {}
+            }
 
-              if (cells.length > 0) {
-                // Group cells by tableId and format as rows
-                var tables = {};
-                for (var ci = 0; ci < cells.length; ci++) {
-                  var c = cells[ci];
-                  var tid = c.tableId || 0;
-                  if (!tables[tid]) tables[tid] = { id: tid, cells: [], rows: {} };
-                  tables[tid].cells.push(c);
-                  if (!tables[tid].rows[c.row]) tables[tid].rows[c.row] = {};
-                  tables[tid].rows[c.row][c.col] = c.text;
-                }
+            if (items.length > 0) {
+              results.push({name: name, count: items.length, items: items});
+            }
+          } catch(e) {}
+        }
+        return results;
+      })()
+    `;
+  }
 
-                // Convert rows object to sorted array
-                var tableList = [];
-                for (var tid in tables) {
-                  var t = tables[tid];
-                  var rowArr = [];
-                  var rowNums = Object.keys(t.rows).map(Number).sort(function(a,b){return a-b;});
-                  for (var ri = 0; ri < rowNums.length; ri++) {
-                    var rowData = t.rows[rowNums[ri]];
-                    var colNums = Object.keys(rowData).map(Number).sort(function(a,b){return a-b;});
-                    var rowText = [];
-                    for (var ci2 = 0; ci2 < colNums.length; ci2++) {
-                      var txt = rowData[colNums[ci2]];
-                      if (txt) rowText.push(txt);
-                    }
-                    if (rowText.length > 0) rowArr.push(rowText.join(' | '));
-                  }
-                  tableList.push({ tableId: Number(tid), row_count: rowNums.length, formatted_rows: rowArr });
-                }
-
-                results.push({ name: name, total_cells: cells.length, tables: tableList });
-              }
-            } catch(e) {}
-          }
-          return results;
-        })()
-      `);
-
-      return jsonResult({ success: true, study_count: data?.length || 0, studies: data || [] });
-    } catch (err) {
-      return jsonResult({ success: false, error: err.message }, true);
-    }
-  });
-
-  server.tool('data_get_pine_boxes', 'Extract box/rectangle data from Pine Script box.new() drawings across all visible indicators. Returns y1/y2 price boundaries.', {
-    study_filter: z.string().optional().describe('Substring to filter study names. Omit for all studies.'),
-    max_boxes: z.number().optional().describe('Max boxes to return per study (default 50)'),
-  }, async ({ study_filter, max_boxes }) => {
-    const limit = max_boxes || 50;
+  server.tool('data_get_pine_lines', 'Read horizontal price levels drawn by Pine Script indicators (line.new). Returns deduplicated price levels per study. Use study_filter to target a specific indicator.', {
+    study_filter: z.string().optional().describe('Substring to match study name (e.g., "Profiler", "NY Levels"). Omit for all.'),
+    verbose: z.boolean().optional().describe('Return raw line data with IDs, coordinates, colors (default false — returns only unique price levels)'),
+  }, async ({ study_filter, verbose }) => {
     const filter = study_filter || '';
     try {
-      const data = await evaluate(`
-        (function() {
-          var chart = window.TradingViewApi._activeChartWidgetWV.value()._chartWidget;
-          var model = chart.model();
-          var sources = model.model().dataSources();
-          var results = [];
-          var filter = '${filter}';
+      const raw = await evaluate(buildGraphicsJS('dwglines', 'lines', filter));
+      if (!raw || raw.length === 0) return jsonResult({ success: true, study_count: 0, studies: [] });
 
-          for (var si = 0; si < sources.length; si++) {
-            var s = sources[si];
-            if (!s.metaInfo) continue;
-            try {
-              var meta = s.metaInfo();
-              var name = meta.description || meta.shortDescription || '';
-              if (!name) continue;
-              if (filter && name.indexOf(filter) === -1) continue;
+      const studies = raw.map(s => {
+        const hLevels = [];
+        const seen = {};
+        const allLines = [];
 
-              var g = s._graphics;
-              if (!g || !g._primitivesCollection) continue;
-              var pc = g._primitivesCollection;
+        for (const item of s.items) {
+          const v = item.raw;
+          const y1 = v.y1 != null ? Math.round(v.y1 * 100) / 100 : null;
+          const y2 = v.y2 != null ? Math.round(v.y2 * 100) / 100 : null;
 
-              var boxes = [];
-              try {
-                var dwgboxes = pc.dwgboxes;
-                if (dwgboxes) {
-                  var boxesMap = dwgboxes.get('boxes');
-                  if (boxesMap) {
-                    var coll = boxesMap.get(false);
-                    if (coll && coll._primitivesDataById && coll._primitivesDataById.size > 0) {
-                      coll._primitivesDataById.forEach(function(v, id) {
-                        if (boxes.length < ${limit}) {
-                          boxes.push({
-                            id: id,
-                            y1: v.y1 != null ? Math.round(v.y1 * 100) / 100 : null,
-                            y2: v.y2 != null ? Math.round(v.y2 * 100) / 100 : null,
-                            x1: v.x1, x2: v.x2,
-                            borderColor: v.c, bgColor: v.bc
-                          });
-                        }
-                      });
-                    }
-                  }
-                }
-              } catch(e) {}
-
-              if (boxes.length > 0) {
-                results.push({ name: name, total_boxes: boxes.length, boxes: boxes });
-              }
-            } catch(e) {}
+          if (verbose) {
+            allLines.push({ id: item.id, y1, y2, x1: v.x1, x2: v.x2, horizontal: v.y1 === v.y2, style: v.st, width: v.w, color: v.ci });
           }
-          return results;
-        })()
-      `);
 
-      return jsonResult({ success: true, study_count: data?.length || 0, studies: data || [] });
+          // Collect unique horizontal levels
+          if (y1 != null && v.y1 === v.y2 && !seen[y1]) {
+            hLevels.push(y1);
+            seen[y1] = true;
+          }
+        }
+        hLevels.sort((a, b) => b - a);
+
+        const result = { name: s.name, total_lines: s.count, horizontal_levels: hLevels };
+        if (verbose) result.all_lines = allLines;
+        return result;
+      });
+
+      return jsonResult({ success: true, study_count: studies.length, studies });
     } catch (err) {
       return jsonResult({ success: false, error: err.message }, true);
     }
   });
 
-  server.tool('data_get_study_values', 'Get current indicator values from the data window for all visible studies. Works for standard indicators (RSI, MACD, Bollinger Bands, EMAs, etc.) and any Pine indicator that uses plot() with visible display.', {}, async () => {
+  server.tool('data_get_pine_labels', 'Read text labels drawn by Pine Script indicators (label.new). Returns text and price pairs. Use study_filter to target a specific indicator.', {
+    study_filter: z.string().optional().describe('Substring to match study name. Omit for all.'),
+    verbose: z.boolean().optional().describe('Return raw label data with IDs, colors, positions (default false — returns only text + price)'),
+  }, async ({ study_filter, verbose }) => {
+    const filter = study_filter || '';
+    try {
+      const raw = await evaluate(buildGraphicsJS('dwglabels', 'labels', filter));
+      if (!raw || raw.length === 0) return jsonResult({ success: true, study_count: 0, studies: [] });
+
+      const studies = raw.map(s => {
+        const labels = s.items.map(item => {
+          const v = item.raw;
+          const text = v.t || '';
+          const price = v.y != null ? Math.round(v.y * 100) / 100 : null;
+          if (verbose) {
+            return { id: item.id, text, price, x: v.x, yloc: v.yl, size: v.sz, textColor: v.tci, color: v.ci };
+          }
+          return { text, price };
+        }).filter(l => l.text || l.price != null);
+
+        return { name: s.name, total_labels: s.count, labels };
+      });
+
+      return jsonResult({ success: true, study_count: studies.length, studies });
+    } catch (err) {
+      return jsonResult({ success: false, error: err.message }, true);
+    }
+  });
+
+  server.tool('data_get_pine_tables', 'Read table data drawn by Pine Script indicators (table.new). Returns formatted text rows per table. Use study_filter to target a specific indicator.', {
+    study_filter: z.string().optional().describe('Substring to match study name. Omit for all.'),
+  }, async ({ study_filter }) => {
+    const filter = study_filter || '';
+    try {
+      const raw = await evaluate(buildGraphicsJS('dwgtablecells', 'tableCells', filter));
+      if (!raw || raw.length === 0) return jsonResult({ success: true, study_count: 0, studies: [] });
+
+      const studies = raw.map(s => {
+        // Group by tableId → row → col, then format as pipe-delimited rows
+        const tables = {};
+        for (const item of s.items) {
+          const v = item.raw;
+          const tid = v.tid || 0;
+          if (!tables[tid]) tables[tid] = {};
+          if (!tables[tid][v.row]) tables[tid][v.row] = {};
+          tables[tid][v.row][v.col] = v.t || '';
+        }
+
+        const tableList = Object.entries(tables).map(([tid, rows]) => {
+          const rowNums = Object.keys(rows).map(Number).sort((a, b) => a - b);
+          const formatted = rowNums.map(rn => {
+            const cols = rows[rn];
+            const colNums = Object.keys(cols).map(Number).sort((a, b) => a - b);
+            return colNums.map(cn => cols[cn]).filter(Boolean).join(' | ');
+          }).filter(Boolean);
+          return { rows: formatted };
+        });
+
+        return { name: s.name, tables: tableList };
+      });
+
+      return jsonResult({ success: true, study_count: studies.length, studies });
+    } catch (err) {
+      return jsonResult({ success: false, error: err.message }, true);
+    }
+  });
+
+  server.tool('data_get_pine_boxes', 'Read box/zone boundaries drawn by Pine Script indicators (box.new). Returns deduplicated {high, low} price zones. Use study_filter to target a specific indicator.', {
+    study_filter: z.string().optional().describe('Substring to match study name. Omit for all.'),
+    verbose: z.boolean().optional().describe('Return all boxes with IDs and coordinates (default false — returns unique price zones)'),
+  }, async ({ study_filter, verbose }) => {
+    const filter = study_filter || '';
+    try {
+      const raw = await evaluate(buildGraphicsJS('dwgboxes', 'boxes', filter));
+      if (!raw || raw.length === 0) return jsonResult({ success: true, study_count: 0, studies: [] });
+
+      const studies = raw.map(s => {
+        const zones = [];
+        const seen = {};
+        const allBoxes = [];
+
+        for (const item of s.items) {
+          const v = item.raw;
+          const high = v.y1 != null && v.y2 != null ? Math.round(Math.max(v.y1, v.y2) * 100) / 100 : null;
+          const low = v.y1 != null && v.y2 != null ? Math.round(Math.min(v.y1, v.y2) * 100) / 100 : null;
+
+          if (verbose) {
+            allBoxes.push({ id: item.id, high, low, x1: v.x1, x2: v.x2, borderColor: v.c, bgColor: v.bc });
+          }
+
+          if (high != null && low != null) {
+            const key = high + ':' + low;
+            if (!seen[key]) { zones.push({ high, low }); seen[key] = true; }
+          }
+        }
+        zones.sort((a, b) => b.high - a.high);
+
+        const result = { name: s.name, total_boxes: s.count, zones };
+        if (verbose) result.all_boxes = allBoxes;
+        return result;
+      });
+
+      return jsonResult({ success: true, study_count: studies.length, studies });
+    } catch (err) {
+      return jsonResult({ success: false, error: err.message }, true);
+    }
+  });
+
+  server.tool('data_get_study_values', 'Get current indicator values from the data window for all visible studies (RSI, MACD, Bollinger Bands, EMAs, custom indicators with plot()).', {}, async () => {
     try {
       const data = await evaluate(`
         (function() {
