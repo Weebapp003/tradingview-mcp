@@ -57,7 +57,7 @@ export function registerHealthTools(server) {
           text: JSON.stringify({
             success: false,
             error: err.message,
-            hint: 'Make sure TradingView is running with CDP enabled. Run scripts/launch_tv_debug.bat',
+            hint: 'TradingView is not running with CDP enabled. Use the tv_launch tool to start it automatically.',
           }, null, 2),
         }],
         isError: true,
