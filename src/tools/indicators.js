@@ -1,161 +1,21 @@
 import { z } from 'zod';
-import { evaluate } from '../connection.js';
-
-const CHART_API = 'window.TradingViewApi._activeChartWidgetWV.value()';
+import { jsonResult } from './_format.js';
+import * as core from '../core/indicators.js';
 
 export function registerIndicatorTools(server) {
-
-  // ── 1. indicator_set_inputs — Change indicator settings ──
-
   server.tool('indicator_set_inputs', 'Change indicator/study input values (e.g., length, source, period)', {
     entity_id: z.string().describe('Entity ID of the study (from chart_get_state)'),
     inputs: z.string().describe('JSON string of input overrides, e.g. \'{"length": 50, "source": "close"}\'. Keys are input IDs, values are the new values.'),
-  }, async ({ entity_id, inputs: inputsRaw }) => {
-    try {
-      const inputs = inputsRaw ? JSON.parse(inputsRaw) : undefined;
-      if (!entity_id) {
-        return {
-          content: [{ type: 'text', text: JSON.stringify({
-            success: false,
-            error: 'entity_id is required. Use chart_get_state to find study IDs.',
-          }, null, 2) }],
-          isError: true,
-        };
-      }
-
-      if (!inputs || typeof inputs !== 'object' || Object.keys(inputs).length === 0) {
-        return {
-          content: [{ type: 'text', text: JSON.stringify({
-            success: false,
-            error: 'inputs must be a non-empty object, e.g. { length: 50 }',
-          }, null, 2) }],
-          isError: true,
-        };
-      }
-
-      const escapedId = entity_id.replace(/'/g, "\\'");
-      const inputsJson = JSON.stringify(inputs);
-
-      const result = await evaluate(`
-        (function() {
-          var chart = ${CHART_API};
-          var study = chart.getStudyById('${escapedId}');
-          if (!study) return { error: 'Study not found: ${escapedId}' };
-
-          var currentInputs = study.getInputValues();
-          var overrides = ${inputsJson};
-          var updatedKeys = {};
-
-          for (var i = 0; i < currentInputs.length; i++) {
-            if (overrides.hasOwnProperty(currentInputs[i].id)) {
-              currentInputs[i].value = overrides[currentInputs[i].id];
-              updatedKeys[currentInputs[i].id] = overrides[currentInputs[i].id];
-            }
-          }
-
-          study.setInputValues(currentInputs);
-
-          // Filter all_inputs to avoid returning huge encoded blobs (pineFeatures, etc.)
-          var allInputs = study.getInputValues();
-          var source = allInputs.length > 0 ? allInputs : currentInputs;
-          var filtered = [];
-          for (var j = 0; j < source.length; j++) {
-            var inp = source[j];
-            if (typeof inp.value === 'string' && inp.value.length > 200) continue;
-            filtered.push(inp);
-          }
-          return {
-            updated_inputs: updatedKeys,
-            all_inputs: filtered,
-            note: allInputs.length === 0 ? 'Study is recompiling — inputs shown are the values set' : undefined,
-          };
-        })()
-      `);
-
-      if (result && result.error) {
-        return {
-          content: [{ type: 'text', text: JSON.stringify({ success: false, error: result.error }, null, 2) }],
-          isError: true,
-        };
-      }
-
-      return {
-        content: [{ type: 'text', text: JSON.stringify({
-          success: true,
-          entity_id,
-          updated_inputs: result.updated_inputs,
-          all_inputs: result.all_inputs,
-        }, null, 2) }],
-      };
-    } catch (err) {
-      return {
-        content: [{ type: 'text', text: JSON.stringify({ success: false, error: err.message }, null, 2) }],
-        isError: true,
-      };
-    }
+  }, async ({ entity_id, inputs }) => {
+    try { return jsonResult(await core.setInputs({ entity_id, inputs })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
-
-  // ── 2. indicator_toggle_visibility — Show/hide a study ──
 
   server.tool('indicator_toggle_visibility', 'Show or hide an indicator/study on the chart', {
     entity_id: z.string().describe('Entity ID of the study (from chart_get_state)'),
     visible: z.coerce.boolean().describe('true to show, false to hide'),
   }, async ({ entity_id, visible }) => {
-    try {
-      if (!entity_id) {
-        return {
-          content: [{ type: 'text', text: JSON.stringify({
-            success: false,
-            error: 'entity_id is required. Use chart_get_state to find study IDs.',
-          }, null, 2) }],
-          isError: true,
-        };
-      }
-
-      if (typeof visible !== 'boolean') {
-        return {
-          content: [{ type: 'text', text: JSON.stringify({
-            success: false,
-            error: 'visible must be a boolean (true or false)',
-          }, null, 2) }],
-          isError: true,
-        };
-      }
-
-      const escapedId = entity_id.replace(/'/g, "\\'");
-
-      const result = await evaluate(`
-        (function() {
-          var chart = ${CHART_API};
-          var study = chart.getStudyById('${escapedId}');
-          if (!study) return { error: 'Study not found: ${escapedId}' };
-
-          study.setVisible(${visible});
-          var actualVisible = study.isVisible();
-
-          return { visible: actualVisible };
-        })()
-      `);
-
-      if (result && result.error) {
-        return {
-          content: [{ type: 'text', text: JSON.stringify({ success: false, error: result.error }, null, 2) }],
-          isError: true,
-        };
-      }
-
-      return {
-        content: [{ type: 'text', text: JSON.stringify({
-          success: true,
-          entity_id,
-          visible: result.visible,
-        }, null, 2) }],
-      };
-    } catch (err) {
-      return {
-        content: [{ type: 'text', text: JSON.stringify({ success: false, error: err.message }, null, 2) }],
-        isError: true,
-      };
-    }
+    try { return jsonResult(await core.toggleVisibility({ entity_id, visible })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 }

@@ -16,6 +16,14 @@ const KNOWN_PATHS = {
   alertService: 'window.TradingViewApi._alertService',
   chartApiInstance: 'window.ChartApiInstance',
   mainSeriesBars: 'window.TradingViewApi._activeChartWidgetWV.value()._chartWidget.model().mainSeries().bars()',
+  // Phase 1: Strategy data — model().dataSources() → find strategy → .performance().value(), .ordersData(), .reportData()
+  strategyStudy: 'chart._chartWidget.model().model().dataSources()',
+  // Phase 2: Layouts — getSavedCharts(cb), loadChartFromServer(id)
+  layoutManager: 'window.TradingViewApi.getSavedCharts',
+  // Phase 5: Symbol search — searchSymbols(query) returns Promise
+  symbolSearchApi: 'window.TradingViewApi.searchSymbols',
+  // Phase 6: Pine scripts — REST API at pine-facade.tradingview.com/pine-facade/list/?filter=saved
+  pineFacadeApi: 'https://pine-facade.tradingview.com/pine-facade',
 };
 
 export { KNOWN_PATHS };
