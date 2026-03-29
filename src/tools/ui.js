@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { evaluate, getClient } from '../connection.js';
 
 export function registerUiTools(server) {
@@ -5,21 +6,10 @@ export function registerUiTools(server) {
   // ── 1. ui_click — Generic smart button clicker ──
 
   server.tool('ui_click', 'Click a UI element by aria-label, data-name, text content, or class substring', {
-    by: { type: 'string', description: 'Selector strategy: aria-label, data-name, text, class-contains' },
-    value: { type: 'string', description: 'Value to match against the chosen selector strategy' },
+    by: z.enum(['aria-label', 'data-name', 'text', 'class-contains']).describe('Selector strategy'),
+    value: z.string().describe('Value to match against the chosen selector strategy'),
   }, async ({ by, value }) => {
     try {
-      const validStrategies = ['aria-label', 'data-name', 'text', 'class-contains'];
-      if (!validStrategies.includes(by)) {
-        return {
-          content: [{ type: 'text', text: JSON.stringify({
-            success: false,
-            error: `Invalid selector strategy: "${by}". Must be one of: ${validStrategies.join(', ')}`,
-          }, null, 2) }],
-          isError: true,
-        };
-      }
-
       const escaped = JSON.stringify(value);
       const result = await evaluate(`
         (function() {
@@ -84,32 +74,10 @@ export function registerUiTools(server) {
   // ── 2. ui_open_panel — Open/close specific panels ──
 
   server.tool('ui_open_panel', 'Open, close, or toggle TradingView panels (pine-editor, strategy-tester, watchlist, alerts, trading)', {
-    panel: { type: 'string', description: 'Panel name: pine-editor, strategy-tester, watchlist, alerts, trading' },
-    action: { type: 'string', description: 'Action: open, close, toggle' },
+    panel: z.enum(['pine-editor', 'strategy-tester', 'watchlist', 'alerts', 'trading']).describe('Panel name'),
+    action: z.enum(['open', 'close', 'toggle']).describe('Action to perform'),
   }, async ({ panel, action }) => {
     try {
-      const validPanels = ['pine-editor', 'strategy-tester', 'watchlist', 'alerts', 'trading'];
-      const validActions = ['open', 'close', 'toggle'];
-
-      if (!validPanels.includes(panel)) {
-        return {
-          content: [{ type: 'text', text: JSON.stringify({
-            success: false,
-            error: `Invalid panel: "${panel}". Must be one of: ${validPanels.join(', ')}`,
-          }, null, 2) }],
-          isError: true,
-        };
-      }
-      if (!validActions.includes(action)) {
-        return {
-          content: [{ type: 'text', text: JSON.stringify({
-            success: false,
-            error: `Invalid action: "${action}". Must be one of: ${validActions.join(', ')}`,
-          }, null, 2) }],
-          isError: true,
-        };
-      }
-
       const isBottomPanel = panel === 'pine-editor' || panel === 'strategy-tester';
 
       if (isBottomPanel) {
@@ -124,17 +92,14 @@ export function registerUiTools(server) {
             var widgetName = ${JSON.stringify(widgetName)};
             var action = ${JSON.stringify(action)};
 
-            // Check visibility: bottom panel area has height > 50
             var bottomArea = document.querySelector('[class*="layout__area--bottom"]');
             var isOpen = !!(bottomArea && bottomArea.offsetHeight > 50);
 
-            // For pine-editor, also check if the monaco editor is present
             if (panel === 'pine-editor') {
               var monacoEl = document.querySelector('.monaco-editor.pine-editor-monaco');
               isOpen = isOpen && !!monacoEl;
             }
 
-            // For strategy-tester, check if backtesting panel is visible
             if (panel === 'strategy-tester') {
               var stratPanel = document.querySelector('[data-name="backtesting"]') || document.querySelector('[class*="strategyReport"]');
               isOpen = isOpen && !!(stratPanel && stratPanel.offsetParent);
@@ -183,7 +148,6 @@ export function registerUiTools(server) {
           }, null, 2) }],
         };
       } else {
-        // Right sidebar panels: watchlist, alerts, trading
         const selectorMap = {
           'watchlist': { dataName: 'base-watchlist-widget-button', ariaLabel: 'Watchlist' },
           'alerts': { dataName: 'alerts-button', ariaLabel: 'Alerts' },
@@ -202,13 +166,11 @@ export function registerUiTools(server) {
 
             if (!btn) return { error: 'Button not found for panel: ' + ${JSON.stringify(panel)} };
 
-            // Check if the panel is currently open by looking at aria-pressed or active class
             var isActive = btn.getAttribute('aria-pressed') === 'true'
               || btn.classList.contains('isActive')
               || btn.classList.toString().indexOf('active') !== -1
               || btn.classList.toString().indexOf('Active') !== -1;
 
-            // Also check if right sidebar is open
             var rightArea = document.querySelector('[class*="layout__area--right"]');
             var sidebarOpen = !!(rightArea && rightArea.offsetWidth > 50);
             var isOpen = isActive && sidebarOpen;
@@ -295,7 +257,6 @@ export function registerUiTools(server) {
 
   server.tool('layout_list', 'List saved chart layouts from the layout dropdown menu', {}, async () => {
     try {
-      // Click the layout dropdown button
       const opened = await evaluate(`
         (function() {
           var btn = document.querySelector('[data-name="save-load-menu"]')
@@ -316,26 +277,21 @@ export function registerUiTools(server) {
         };
       }
 
-      // Wait for dropdown to appear
       await new Promise(r => setTimeout(r, 300));
 
-      // Scrape layout names from the dropdown
       const layouts = await evaluate(`
         (function() {
           var names = [];
-          // Look for menu items in the dropdown
           var items = document.querySelectorAll('[class*="menu"] [class*="item"], [data-name="menu-inner"] [role="menuitem"], [class*="dropdown"] [role="option"], [class*="popup"] [class*="item"]');
           for (var i = 0; i < items.length; i++) {
             var text = items[i].textContent.trim();
             if (text && text.length > 0 && text.length < 100) {
-              // Filter out generic menu actions like "Save", "Load", etc.
               if (!/^(Save|Load|Make a copy|Rename|Delete|Share|Save all charts|Save layout as)$/i.test(text)) {
                 names.push(text);
               }
             }
           }
 
-          // Also try data-name="overlay-menu" pattern
           if (names.length === 0) {
             var overlayItems = document.querySelectorAll('[class*="overlay"] [class*="item"], [class*="contextMenu"] [class*="item"]');
             for (var i = 0; i < overlayItems.length; i++) {
@@ -350,7 +306,6 @@ export function registerUiTools(server) {
         })()
       `);
 
-      // Close the dropdown by pressing Escape
       const c = await getClient();
       await c.Input.dispatchKeyEvent({ type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
       await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 'Escape', code: 'Escape' });
@@ -363,7 +318,6 @@ export function registerUiTools(server) {
         }, null, 2) }],
       };
     } catch (err) {
-      // Attempt to close any open dropdown on error
       try {
         const c = await getClient();
         await c.Input.dispatchKeyEvent({ type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
@@ -380,10 +334,9 @@ export function registerUiTools(server) {
   // ── 5. layout_switch — Switch to a saved layout ──
 
   server.tool('layout_switch', 'Switch to a saved chart layout by name', {
-    name: { type: 'string', description: 'Name of the layout to switch to' },
+    name: z.string().describe('Name of the layout to switch to'),
   }, async ({ name }) => {
     try {
-      // Click the layout dropdown button
       const opened = await evaluate(`
         (function() {
           var btn = document.querySelector('[data-name="save-load-menu"]')
@@ -404,10 +357,8 @@ export function registerUiTools(server) {
         };
       }
 
-      // Wait for dropdown to appear
       await new Promise(r => setTimeout(r, 300));
 
-      // Find and click the layout by name
       const escaped = JSON.stringify(name);
       const clicked = await evaluate(`
         (function() {
@@ -421,7 +372,6 @@ export function registerUiTools(server) {
             }
           }
 
-          // Also try overlay pattern
           var overlayItems = document.querySelectorAll('[class*="overlay"] [class*="item"], [class*="contextMenu"] [class*="item"]');
           for (var i = 0; i < overlayItems.length; i++) {
             var text = overlayItems[i].textContent.trim();
@@ -436,7 +386,6 @@ export function registerUiTools(server) {
       `);
 
       if (!clicked || !clicked.found) {
-        // Close the dropdown since we didn't find the layout
         const c = await getClient();
         await c.Input.dispatchKeyEvent({ type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
         await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 'Escape', code: 'Escape' });
@@ -450,7 +399,6 @@ export function registerUiTools(server) {
         };
       }
 
-      // Wait for layout to load
       await new Promise(r => setTimeout(r, 500));
 
       return {
@@ -461,13 +409,358 @@ export function registerUiTools(server) {
         }, null, 2) }],
       };
     } catch (err) {
-      // Attempt to close any open dropdown on error
       try {
         const c = await getClient();
         await c.Input.dispatchKeyEvent({ type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
         await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 'Escape', code: 'Escape' });
       } catch (_) {}
 
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ success: false, error: err.message }, null, 2) }],
+        isError: true,
+      };
+    }
+  });
+
+  // ── 6. ui_keyboard — Press keyboard keys/shortcuts ──
+
+  server.tool('ui_keyboard', 'Press keyboard keys or shortcuts (e.g., Enter, Escape, Alt+S, Ctrl+Z)', {
+    key: z.string().describe('Key to press (e.g., "Enter", "Escape", "Tab", "a", "ArrowUp")'),
+    modifiers: z.array(z.enum(['ctrl', 'alt', 'shift', 'meta'])).optional().describe('Modifier keys to hold (e.g., ["ctrl", "shift"])'),
+  }, async ({ key, modifiers }) => {
+    try {
+      const c = await getClient();
+      let mod = 0;
+      if (modifiers) {
+        if (modifiers.includes('alt')) mod |= 1;
+        if (modifiers.includes('ctrl')) mod |= 2;
+        if (modifiers.includes('meta')) mod |= 4;
+        if (modifiers.includes('shift')) mod |= 8;
+      }
+
+      const keyMap = {
+        'Enter': { code: 'Enter', vk: 13 },
+        'Escape': { code: 'Escape', vk: 27 },
+        'Tab': { code: 'Tab', vk: 9 },
+        'Backspace': { code: 'Backspace', vk: 8 },
+        'Delete': { code: 'Delete', vk: 46 },
+        'ArrowUp': { code: 'ArrowUp', vk: 38 },
+        'ArrowDown': { code: 'ArrowDown', vk: 40 },
+        'ArrowLeft': { code: 'ArrowLeft', vk: 37 },
+        'ArrowRight': { code: 'ArrowRight', vk: 39 },
+        'Space': { code: 'Space', vk: 32 },
+        'Home': { code: 'Home', vk: 36 },
+        'End': { code: 'End', vk: 35 },
+        'PageUp': { code: 'PageUp', vk: 33 },
+        'PageDown': { code: 'PageDown', vk: 34 },
+        'F1': { code: 'F1', vk: 112 },
+        'F2': { code: 'F2', vk: 113 },
+        'F5': { code: 'F5', vk: 116 },
+      };
+
+      const mapped = keyMap[key] || { code: 'Key' + key.toUpperCase(), vk: key.toUpperCase().charCodeAt(0) };
+
+      await c.Input.dispatchKeyEvent({
+        type: 'keyDown',
+        modifiers: mod,
+        key: key,
+        code: mapped.code,
+        windowsVirtualKeyCode: mapped.vk,
+      });
+      await c.Input.dispatchKeyEvent({
+        type: 'keyUp',
+        key: key,
+        code: mapped.code,
+      });
+
+      return {
+        content: [{ type: 'text', text: JSON.stringify({
+          success: true,
+          key,
+          modifiers: modifiers || [],
+        }, null, 2) }],
+      };
+    } catch (err) {
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ success: false, error: err.message }, null, 2) }],
+        isError: true,
+      };
+    }
+  });
+
+  // ── 7. ui_type_text — Type text into focused element ──
+
+  server.tool('ui_type_text', 'Type text into the currently focused input/textarea element', {
+    text: z.string().describe('Text to type into the focused element'),
+  }, async ({ text }) => {
+    try {
+      const c = await getClient();
+      await c.Input.insertText({ text });
+
+      return {
+        content: [{ type: 'text', text: JSON.stringify({
+          success: true,
+          typed: text.substring(0, 100),
+          length: text.length,
+        }, null, 2) }],
+      };
+    } catch (err) {
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ success: false, error: err.message }, null, 2) }],
+        isError: true,
+      };
+    }
+  });
+
+  // ── 8. ui_hover — Hover over an element ──
+
+  server.tool('ui_hover', 'Hover over a UI element by aria-label, data-name, or text content', {
+    by: z.enum(['aria-label', 'data-name', 'text', 'class-contains']).describe('Selector strategy'),
+    value: z.string().describe('Value to match'),
+  }, async ({ by, value }) => {
+    try {
+      const coords = await evaluate(`
+        (function() {
+          var by = ${JSON.stringify(by)};
+          var value = ${JSON.stringify(value)};
+          var el = null;
+
+          if (by === 'aria-label') {
+            el = document.querySelector('[aria-label="' + value.replace(/"/g, '\\\\"') + '"]');
+          } else if (by === 'data-name') {
+            el = document.querySelector('[data-name="' + value.replace(/"/g, '\\\\"') + '"]');
+          } else if (by === 'text') {
+            var candidates = document.querySelectorAll('button, a, [role="button"], [role="menuitem"], [role="tab"], span, div');
+            for (var i = 0; i < candidates.length; i++) {
+              var text = candidates[i].textContent.trim();
+              if (text === value || text.toLowerCase() === value.toLowerCase()) {
+                el = candidates[i];
+                break;
+              }
+            }
+          } else if (by === 'class-contains') {
+            el = document.querySelector('[class*="' + value.replace(/"/g, '\\\\"') + '"]');
+          }
+
+          if (!el) return null;
+          var rect = el.getBoundingClientRect();
+          return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2, tag: el.tagName.toLowerCase() };
+        })()
+      `);
+
+      if (!coords) {
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ success: false, error: 'Element not found for ' + by + '="' + value + '"' }, null, 2) }],
+          isError: true,
+        };
+      }
+
+      const c = await getClient();
+      await c.Input.dispatchMouseEvent({
+        type: 'mouseMoved',
+        x: coords.x,
+        y: coords.y,
+      });
+
+      return {
+        content: [{ type: 'text', text: JSON.stringify({
+          success: true,
+          hovered: { by, value, tag: coords.tag, x: coords.x, y: coords.y },
+        }, null, 2) }],
+      };
+    } catch (err) {
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ success: false, error: err.message }, null, 2) }],
+        isError: true,
+      };
+    }
+  });
+
+  // ── 9. ui_scroll — Scroll the chart or page ──
+
+  server.tool('ui_scroll', 'Scroll the chart or page up/down/left/right', {
+    direction: z.enum(['up', 'down', 'left', 'right']).describe('Scroll direction'),
+    amount: z.coerce.number().optional().describe('Scroll amount in pixels (default 300)'),
+  }, async ({ direction, amount }) => {
+    try {
+      const c = await getClient();
+      const px = amount || 300;
+
+      // Get center of chart for scroll target
+      const center = await evaluate(`
+        (function() {
+          var el = document.querySelector('[data-name="pane-canvas"]')
+            || document.querySelector('[class*="chart-container"]')
+            || document.querySelector('canvas');
+          if (!el) return { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+          var rect = el.getBoundingClientRect();
+          return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+        })()
+      `);
+
+      let deltaX = 0, deltaY = 0;
+      if (direction === 'up') deltaY = -px;
+      else if (direction === 'down') deltaY = px;
+      else if (direction === 'left') deltaX = -px;
+      else if (direction === 'right') deltaX = px;
+
+      await c.Input.dispatchMouseEvent({
+        type: 'mouseWheel',
+        x: center.x,
+        y: center.y,
+        deltaX,
+        deltaY,
+      });
+
+      return {
+        content: [{ type: 'text', text: JSON.stringify({
+          success: true,
+          direction,
+          amount: px,
+        }, null, 2) }],
+      };
+    } catch (err) {
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ success: false, error: err.message }, null, 2) }],
+        isError: true,
+      };
+    }
+  });
+
+  // ── 10. ui_mouse_click — Click at specific coordinates ──
+
+  server.tool('ui_mouse_click', 'Click at specific x,y coordinates on the TradingView window', {
+    x: z.coerce.number().describe('X coordinate (pixels from left)'),
+    y: z.coerce.number().describe('Y coordinate (pixels from top)'),
+    button: z.enum(['left', 'right', 'middle']).optional().describe('Mouse button (default left)'),
+    double_click: z.coerce.boolean().optional().describe('Double click (default false)'),
+  }, async ({ x, y, button, double_click }) => {
+    try {
+      const c = await getClient();
+      const btn = button === 'right' ? 'right' : button === 'middle' ? 'middle' : 'left';
+      const btnNum = btn === 'right' ? 2 : btn === 'middle' ? 1 : 0;
+
+      await c.Input.dispatchMouseEvent({ type: 'mouseMoved', x, y });
+      await c.Input.dispatchMouseEvent({ type: 'mousePressed', x, y, button: btn, buttons: btnNum, clickCount: 1 });
+      await c.Input.dispatchMouseEvent({ type: 'mouseReleased', x, y, button: btn });
+
+      if (double_click) {
+        await new Promise(r => setTimeout(r, 50));
+        await c.Input.dispatchMouseEvent({ type: 'mousePressed', x, y, button: btn, buttons: btnNum, clickCount: 2 });
+        await c.Input.dispatchMouseEvent({ type: 'mouseReleased', x, y, button: btn });
+      }
+
+      return {
+        content: [{ type: 'text', text: JSON.stringify({
+          success: true,
+          x, y, button: btn,
+          double_click: !!double_click,
+        }, null, 2) }],
+      };
+    } catch (err) {
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ success: false, error: err.message }, null, 2) }],
+        isError: true,
+      };
+    }
+  });
+
+  // ── 11. ui_find_element — Find elements matching a query ──
+
+  server.tool('ui_find_element', 'Find UI elements by text, aria-label, or CSS selector and return their positions', {
+    query: z.string().describe('Text content, aria-label value, or CSS selector to search for'),
+    strategy: z.enum(['text', 'aria-label', 'css']).optional().describe('Search strategy (default: text)'),
+  }, async ({ query, strategy }) => {
+    try {
+      const strat = strategy || 'text';
+      const results = await evaluate(`
+        (function() {
+          var query = ${JSON.stringify(query)};
+          var strategy = ${JSON.stringify(strat)};
+          var results = [];
+
+          if (strategy === 'css') {
+            var els = document.querySelectorAll(query);
+            for (var i = 0; i < Math.min(els.length, 20); i++) {
+              var rect = els[i].getBoundingClientRect();
+              results.push({
+                tag: els[i].tagName.toLowerCase(),
+                text: (els[i].textContent || '').trim().substring(0, 80),
+                aria_label: els[i].getAttribute('aria-label') || null,
+                data_name: els[i].getAttribute('data-name') || null,
+                x: rect.x, y: rect.y, width: rect.width, height: rect.height,
+                visible: els[i].offsetParent !== null,
+              });
+            }
+          } else if (strategy === 'aria-label') {
+            var els = document.querySelectorAll('[aria-label*="' + query.replace(/"/g, '\\\\"') + '"]');
+            for (var i = 0; i < Math.min(els.length, 20); i++) {
+              var rect = els[i].getBoundingClientRect();
+              results.push({
+                tag: els[i].tagName.toLowerCase(),
+                text: (els[i].textContent || '').trim().substring(0, 80),
+                aria_label: els[i].getAttribute('aria-label') || null,
+                data_name: els[i].getAttribute('data-name') || null,
+                x: rect.x, y: rect.y, width: rect.width, height: rect.height,
+                visible: els[i].offsetParent !== null,
+              });
+            }
+          } else {
+            var all = document.querySelectorAll('button, a, [role="button"], [role="menuitem"], [role="tab"], input, select, label, span, div, h1, h2, h3, h4');
+            for (var i = 0; i < all.length; i++) {
+              var text = all[i].textContent.trim();
+              if (text.toLowerCase().indexOf(query.toLowerCase()) !== -1 && text.length < 200) {
+                var rect = all[i].getBoundingClientRect();
+                if (rect.width > 0 && rect.height > 0) {
+                  results.push({
+                    tag: all[i].tagName.toLowerCase(),
+                    text: text.substring(0, 80),
+                    aria_label: all[i].getAttribute('aria-label') || null,
+                    data_name: all[i].getAttribute('data-name') || null,
+                    x: rect.x, y: rect.y, width: rect.width, height: rect.height,
+                    visible: all[i].offsetParent !== null,
+                  });
+                  if (results.length >= 20) break;
+                }
+              }
+            }
+          }
+
+          return results;
+        })()
+      `);
+
+      return {
+        content: [{ type: 'text', text: JSON.stringify({
+          success: true,
+          query,
+          strategy: strat,
+          count: results?.length || 0,
+          elements: results || [],
+        }, null, 2) }],
+      };
+    } catch (err) {
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ success: false, error: err.message }, null, 2) }],
+        isError: true,
+      };
+    }
+  });
+
+  // ── 12. ui_evaluate — Execute arbitrary JavaScript in the TradingView page context ──
+
+  server.tool('ui_evaluate', 'Execute JavaScript code in the TradingView page context for advanced automation', {
+    expression: z.string().describe('JavaScript expression to evaluate in the page context. Wrap in IIFE for complex logic.'),
+  }, async ({ expression }) => {
+    try {
+      const result = await evaluate(expression);
+      return {
+        content: [{ type: 'text', text: JSON.stringify({
+          success: true,
+          result,
+        }, null, 2) }],
+      };
+    } catch (err) {
       return {
         content: [{ type: 'text', text: JSON.stringify({ success: false, error: err.message }, null, 2) }],
         isError: true,

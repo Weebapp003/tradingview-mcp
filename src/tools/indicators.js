@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { evaluate } from '../connection.js';
 
 const CHART_API = 'window.TradingViewApi._activeChartWidgetWV.value()';
@@ -7,10 +8,11 @@ export function registerIndicatorTools(server) {
   // ── 1. indicator_set_inputs — Change indicator settings ──
 
   server.tool('indicator_set_inputs', 'Change indicator/study input values (e.g., length, source, period)', {
-    entity_id: { type: 'string', description: 'Entity ID of the study (from chart_get_state)' },
-    inputs: { type: 'object', description: 'Object of input overrides, e.g. { length: 50, source: "close" }. Keys are input IDs, values are the new values.' },
-  }, async ({ entity_id, inputs }) => {
+    entity_id: z.string().describe('Entity ID of the study (from chart_get_state)'),
+    inputs: z.string().describe('JSON string of input overrides, e.g. \'{"length": 50, "source": "close"}\'. Keys are input IDs, values are the new values.'),
+  }, async ({ entity_id, inputs: inputsRaw }) => {
     try {
+      const inputs = inputsRaw ? JSON.parse(inputsRaw) : undefined;
       if (!entity_id) {
         return {
           content: [{ type: 'text', text: JSON.stringify({
@@ -53,12 +55,18 @@ export function registerIndicatorTools(server) {
 
           study.setInputValues(currentInputs);
 
-          // Some complex studies recompile after setInputValues, making getInputValues()
-          // temporarily return []. Return the values we set instead.
+          // Filter all_inputs to avoid returning huge encoded blobs (pineFeatures, etc.)
           var allInputs = study.getInputValues();
+          var source = allInputs.length > 0 ? allInputs : currentInputs;
+          var filtered = [];
+          for (var j = 0; j < source.length; j++) {
+            var inp = source[j];
+            if (typeof inp.value === 'string' && inp.value.length > 200) continue;
+            filtered.push(inp);
+          }
           return {
             updated_inputs: updatedKeys,
-            all_inputs: allInputs.length > 0 ? allInputs : currentInputs,
+            all_inputs: filtered,
             note: allInputs.length === 0 ? 'Study is recompiling — inputs shown are the values set' : undefined,
           };
         })()
@@ -90,8 +98,8 @@ export function registerIndicatorTools(server) {
   // ── 2. indicator_toggle_visibility — Show/hide a study ──
 
   server.tool('indicator_toggle_visibility', 'Show or hide an indicator/study on the chart', {
-    entity_id: { type: 'string', description: 'Entity ID of the study (from chart_get_state)' },
-    visible: { type: 'boolean', description: 'true to show, false to hide' },
+    entity_id: z.string().describe('Entity ID of the study (from chart_get_state)'),
+    visible: z.coerce.boolean().describe('true to show, false to hide'),
   }, async ({ entity_id, visible }) => {
     try {
       if (!entity_id) {

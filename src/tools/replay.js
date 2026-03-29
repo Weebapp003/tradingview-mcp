@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { evaluate, getReplayApi } from '../connection.js';
 
 // Helper: many replayApi methods return WatchedValue objects, not primitives.
@@ -9,7 +10,7 @@ function wv(path) {
 export function registerReplayTools(server) {
 
   server.tool('replay_start', 'Start bar replay mode, optionally at a specific date', {
-    date: { type: 'string', description: 'Date to start replay from (YYYY-MM-DD format). If omitted, selects first available date.', default: '' },
+    date: z.string().optional().describe('Date to start replay from (YYYY-MM-DD format). If omitted, selects first available date.'),
   }, async ({ date }) => {
     try {
       const rp = await getReplayApi();
@@ -82,7 +83,7 @@ export function registerReplayTools(server) {
   });
 
   server.tool('replay_autoplay', 'Toggle autoplay in replay mode, optionally set speed', {
-    speed: { type: 'number', description: 'Autoplay delay in ms (lower = faster). Leave empty to just toggle.', default: 0 },
+    speed: z.coerce.number().optional().describe('Autoplay delay in ms (lower = faster). Leave empty to just toggle. (default 0)'),
   }, async ({ speed }) => {
     try {
       const rp = await getReplayApi();
@@ -120,8 +121,9 @@ export function registerReplayTools(server) {
   server.tool('replay_stop', 'Stop replay and return to realtime', {}, async () => {
     try {
       const rp = await getReplayApi();
+      // stopReplay() already returns to realtime — calling goToRealtime() after
+      // causes "Assertion failed: Replay is not started". Skip it.
       await evaluate(`${rp}.stopReplay()`);
-      await evaluate(`${rp}.goToRealtime()`);
       await evaluate(`${rp}.hideReplayToolbar()`);
 
       return {
@@ -136,7 +138,7 @@ export function registerReplayTools(server) {
   });
 
   server.tool('replay_trade', 'Execute a trade action in replay mode (buy, sell, or close position)', {
-    action: { type: 'string', description: 'Trade action: buy, sell, or close' },
+    action: z.string().describe('Trade action: buy, sell, or close'),
   }, async ({ action }) => {
     try {
       const rp = await getReplayApi();

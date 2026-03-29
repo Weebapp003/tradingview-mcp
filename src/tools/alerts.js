@@ -1,11 +1,12 @@
+import { z } from 'zod';
 import { evaluate, getClient } from '../connection.js';
 
 export function registerAlertTools(server) {
 
   server.tool('alert_create', 'Create a price alert via the TradingView alert dialog', {
-    condition: { type: 'string', description: 'Alert condition (e.g., "crossing", "greater_than", "less_than")' },
-    price: { type: 'number', description: 'Price level for the alert' },
-    message: { type: 'string', description: 'Alert message', default: '' },
+    condition: z.string().describe('Alert condition (e.g., "crossing", "greater_than", "less_than")'),
+    price: z.coerce.number().describe('Price level for the alert'),
+    message: z.string().optional().describe('Alert message'),
   }, async ({ condition, price, message }) => {
     try {
       // Open alert dialog via the Create Alert button or Alt+A
@@ -135,7 +136,7 @@ export function registerAlertTools(server) {
   });
 
   server.tool('alert_delete', 'Delete all alerts or open context menu for deletion', {
-    delete_all: { type: 'boolean', description: 'Delete all alerts', default: false },
+    delete_all: z.coerce.boolean().optional().describe('Delete all alerts'),
   }, async ({ delete_all }) => {
     try {
       if (delete_all) {

@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { evaluate, evaluateAsync, getClient } from '../connection.js';
 import { waitForChartReady } from '../wait.js';
 
@@ -38,7 +39,7 @@ export function registerChartTools(server) {
   });
 
   server.tool('chart_set_symbol', 'Change the chart symbol', {
-    symbol: { type: 'string', description: 'Symbol to set (e.g., BTCUSD, AAPL, ES1!, NYMEX:CL1!)' },
+    symbol: z.string().describe('Symbol to set (e.g., BTCUSD, AAPL, ES1!, NYMEX:CL1!)'),
   }, async ({ symbol }) => {
     try {
       await evaluateAsync(`
@@ -70,7 +71,7 @@ export function registerChartTools(server) {
   });
 
   server.tool('chart_set_timeframe', 'Change the chart timeframe/resolution', {
-    timeframe: { type: 'string', description: 'Timeframe (e.g., 1, 5, 15, 60, D, W, M)' },
+    timeframe: z.string().describe('Timeframe (e.g., 1, 5, 15, 60, D, W, M)'),
   }, async ({ timeframe }) => {
     try {
       await evaluate(`
@@ -98,7 +99,7 @@ export function registerChartTools(server) {
   });
 
   server.tool('chart_set_type', 'Change chart type', {
-    chart_type: { type: 'string', description: 'Chart type: Bars(0), Candles(1), Line(2), Area(3), Renko(4), Kagi(5), PointAndFigure(6), LineBreak(7), HeikinAshi(8), HollowCandles(9) — pass name or number' },
+    chart_type: z.string().describe('Chart type: Bars(0), Candles(1), Line(2), Area(3), Renko(4), Kagi(5), PointAndFigure(6), LineBreak(7), HeikinAshi(8), HollowCandles(9) — pass name or number'),
   }, async ({ chart_type }) => {
     try {
       const typeMap = {
@@ -137,12 +138,13 @@ export function registerChartTools(server) {
   });
 
   server.tool('chart_manage_indicator', 'Add or remove an indicator/study on the chart', {
-    action: { type: 'string', description: 'Action: add or remove' },
-    indicator: { type: 'string', description: 'Full indicator name: "Relative Strength Index", "MACD", "Volume", "Moving Average", "Bollinger Bands", "Moving Average Exponential". Short names like RSI/EMA do NOT work.' },
-    entity_id: { type: 'string', description: 'Entity ID to remove (from chart_get_state). Required for remove.', default: '' },
-    inputs: { type: 'object', description: 'Input overrides for the indicator (e.g., { length: 20 })', default: {} },
-  }, async ({ action, indicator, entity_id, inputs }) => {
+    action: z.enum(['add', 'remove']).describe('Action: add or remove'),
+    indicator: z.string().describe('Full indicator name: "Relative Strength Index", "MACD", "Volume", "Moving Average", "Bollinger Bands", "Moving Average Exponential". Short names like RSI/EMA do NOT work.'),
+    entity_id: z.string().optional().describe('Entity ID to remove (from chart_get_state). Required for remove.'),
+    inputs: z.string().optional().describe('JSON string of input overrides for the indicator (e.g., \'{"length": 20}\')'),
+  }, async ({ action, indicator, entity_id, inputs: inputsRaw }) => {
     try {
+      const inputs = inputsRaw ? JSON.parse(inputsRaw) : undefined;
       if (action === 'add') {
         const inputArr = inputs ? Object.entries(inputs).map(([k, v]) => ({ id: k, value: v })) : [];
         // Get studies before adding
@@ -237,8 +239,8 @@ export function registerChartTools(server) {
 
   // ─── chart_set_visible_range ───────────────────────────────────────────
   server.tool('chart_set_visible_range', 'Zoom the chart to a specific date range (unix timestamps)', {
-    from: { type: 'number', description: 'Start of range (unix timestamp in seconds)' },
-    to: { type: 'number', description: 'End of range (unix timestamp in seconds)' },
+    from: z.coerce.number().describe('Start of range (unix timestamp in seconds)'),
+    to: z.coerce.number().describe('End of range (unix timestamp in seconds)'),
   }, async ({ from, to }) => {
     try {
       // setVisibleRange() throws "Not implemented" in TV Desktop.
@@ -288,7 +290,7 @@ export function registerChartTools(server) {
 
   // ─── chart_scroll_to_date ─────────────────────────────────────────────
   server.tool('chart_scroll_to_date', 'Jump the chart view to center on a specific date', {
-    date: { type: 'string', description: 'ISO date string (e.g., "2024-01-15") or unix timestamp as a string' },
+    date: z.string().describe('ISO date string (e.g., "2024-01-15") or unix timestamp as a string'),
   }, async ({ date }) => {
     try {
       // Parse the date to a unix timestamp
@@ -400,7 +402,7 @@ export function registerChartTools(server) {
 
   // ─── symbol_search ────────────────────────────────────────────────────
   server.tool('symbol_search', 'Search for symbols by name or keyword using the TradingView search dialog', {
-    query: { type: 'string', description: 'Search query (e.g., "AAPL", "crude oil", "ES")' },
+    query: z.string().describe('Search query (e.g., "AAPL", "crude oil", "ES")'),
   }, async ({ query }) => {
     try {
       const client = await getClient();

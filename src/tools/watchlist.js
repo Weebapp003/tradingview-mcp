@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { evaluate, getClient } from '../connection.js';
 
 export function registerWatchlistTools(server) {
@@ -195,7 +196,7 @@ export function registerWatchlistTools(server) {
   // ── 2. watchlist_add — Add a symbol to the watchlist ──
 
   server.tool('watchlist_add', 'Add a symbol to the TradingView watchlist', {
-    symbol: { type: 'string', description: 'Symbol to add (e.g., AAPL, BTCUSD, ES1!, NYMEX:CL1!)' },
+    symbol: z.string().describe('Symbol to add (e.g., AAPL, BTCUSD, ES1!, NYMEX:CL1!)'),
   }, async ({ symbol }) => {
     try {
       await ensureWatchlistOpen();

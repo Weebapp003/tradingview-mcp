@@ -1,15 +1,17 @@
+import { z } from 'zod';
 import { evaluate, getChartApi } from '../connection.js';
 
 export function registerDrawingTools(server) {
 
   server.tool('draw_shape', 'Draw a shape/line on the chart', {
-    shape: { type: 'string', description: 'Shape type: horizontal_line, vertical_line, trend_line, rectangle, text' },
-    point: { type: 'object', description: '{ time: unix_timestamp, price: number }' },
-    point2: { type: 'object', description: 'Second point for two-point shapes (trend_line, rectangle)', default: null },
-    overrides: { type: 'object', description: 'Style overrides (e.g., { linecolor: "#ff0000", linewidth: 2 })', default: {} },
-    text: { type: 'string', description: 'Text content for text shapes', default: '' },
-  }, async ({ shape, point, point2, overrides, text }) => {
+    shape: z.string().describe('Shape type: horizontal_line, vertical_line, trend_line, rectangle, text'),
+    point: z.object({ time: z.coerce.number(), price: z.coerce.number() }).describe('{ time: unix_timestamp, price: number }'),
+    point2: z.object({ time: z.coerce.number(), price: z.coerce.number() }).optional().describe('Second point for two-point shapes (trend_line, rectangle)'),
+    overrides: z.string().optional().describe('JSON string of style overrides (e.g., \'{"linecolor": "#ff0000", "linewidth": 2}\')'),
+    text: z.string().optional().describe('Text content for text shapes'),
+  }, async ({ shape, point, point2, overrides: overridesRaw, text }) => {
     try {
+      const overrides = overridesRaw ? JSON.parse(overridesRaw) : {};
       const apiPath = await getChartApi();
       const overridesStr = JSON.stringify(overrides || {});
       const textStr = text ? JSON.stringify(text) : '""';
@@ -103,7 +105,7 @@ export function registerDrawingTools(server) {
 
   // ── Remove Single Drawing ───────────────────────────────────────────
   server.tool('draw_remove_one', 'Remove a specific drawing by entity ID', {
-    entity_id: { type: 'string', description: 'Entity ID of the drawing to remove (from draw_list)' },
+    entity_id: z.string().describe('Entity ID of the drawing to remove (from draw_list)'),
   }, async ({ entity_id }) => {
     try {
       const apiPath = await getChartApi();
@@ -161,7 +163,7 @@ export function registerDrawingTools(server) {
 
   // ── Get Drawing Properties ──────────────────────────────────────────
   server.tool('draw_get_properties', 'Get properties and points of a specific drawing', {
-    entity_id: { type: 'string', description: 'Entity ID of the drawing (from draw_list)' },
+    entity_id: z.string().describe('Entity ID of the drawing (from draw_list)'),
   }, async ({ entity_id }) => {
     try {
       const apiPath = await getChartApi();

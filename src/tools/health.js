@@ -289,8 +289,8 @@ export function registerHealthTools(server) {
 
   // ── Launch TradingView in Debug Mode ──────────────────────────────────
   server.tool('tv_launch', 'Launch TradingView Desktop with Chrome DevTools Protocol (remote debugging) enabled. Auto-detects install location on Mac, Windows, and Linux.', {
-    port: z.number().optional().describe('CDP port (default 9222)'),
-    kill_existing: z.boolean().optional().describe('Kill existing TradingView instances first (default true)'),
+    port: z.coerce.number().optional().describe('CDP port (default 9222)'),
+    kill_existing: z.coerce.boolean().optional().describe('Kill existing TradingView instances first (default true)'),
   }, async ({ port, kill_existing }) => {
     const cdpPort = port || 9222;
     const killFirst = kill_existing !== false;

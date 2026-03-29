@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { evaluate, evaluateAsync, getClient, getChartApi, getChartCollection } from '../connection.js';
 import { waitForChartReady } from '../wait.js';
 import { writeFileSync, mkdirSync } from 'fs';
@@ -10,11 +11,11 @@ const SCREENSHOT_DIR = join(dirname(dirname(__dirname)), 'screenshots');
 export function registerBatchTools(server) {
 
   server.tool('batch_run', 'Run an action across multiple symbols and/or timeframes', {
-    symbols: { type: 'array', description: 'Array of symbols to iterate (e.g., ["BTCUSD", "ETHUSD", "AAPL"])' },
-    timeframes: { type: 'array', description: 'Array of timeframes (e.g., ["D", "60", "15"])', default: [] },
-    action: { type: 'string', description: 'Action to run: screenshot, get_ohlcv, get_strategy_results' },
-    delay_ms: { type: 'number', description: 'Delay between iterations in ms', default: 2000 },
-    ohlcv_count: { type: 'number', description: 'Bar count for get_ohlcv action', default: 100 },
+    symbols: z.array(z.string()).describe('Array of symbols to iterate (e.g., ["BTCUSD", "ETHUSD", "AAPL"])'),
+    timeframes: z.array(z.string()).optional().describe('Array of timeframes (e.g., ["D", "60", "15"])'),
+    action: z.string().describe('Action to run: screenshot, get_ohlcv, get_strategy_results'),
+    delay_ms: z.coerce.number().optional().describe('Delay between iterations in ms (default 2000)'),
+    ohlcv_count: z.coerce.number().optional().describe('Bar count for get_ohlcv action (default 100)'),
   }, async ({ symbols, timeframes, action, delay_ms, ohlcv_count }) => {
     try {
       const tfs = timeframes && timeframes.length > 0 ? timeframes : [null];
