@@ -782,54 +782,52 @@ export function registerPineTools(server) {
 
       const result = await response.json();
 
-      // Parse the response
+      // Parse the response — TV API returns { success, result: { errors2, warnings2, functions2 } }
       const errors = [];
       const warnings = [];
+      const inner = result?.result;
 
-      if (result.result) {
-        // Success — compiled without errors
-        return { content: [{ type: 'text', text: JSON.stringify({
-          success: true,
-          compiled: true,
-          errors: [],
-          warnings: [],
-          note: 'Pine Script compiled successfully on TradingView servers.',
-        }, null, 2) }] };
-      }
+      if (inner) {
+        // errors2 array: [{start: {line, column}, end: {line, column}, message}]
+        if (inner.errors2 && inner.errors2.length > 0) {
+          for (const e of inner.errors2) {
+            errors.push({
+              line: e.start?.line,
+              column: e.start?.column,
+              end_line: e.end?.line,
+              end_column: e.end?.column,
+              message: e.message,
+            });
+          }
+        }
 
-      // Parse error response
-      if (result.error) {
-        const err = result.error;
-        if (typeof err === 'string') {
-          errors.push({ message: err });
-        } else if (err.message) {
-          errors.push({
-            line: err.line,
-            column: err.column,
-            message: err.message,
-            end_line: err.end_line,
-            end_column: err.end_column,
-          });
+        // warnings2 array (same format)
+        if (inner.warnings2 && inner.warnings2.length > 0) {
+          for (const w of inner.warnings2) {
+            warnings.push({
+              line: w.start?.line,
+              column: w.start?.column,
+              message: w.message,
+            });
+          }
         }
       }
 
-      if (result.warnings) {
-        for (const w of result.warnings) {
-          warnings.push({
-            line: w.line,
-            column: w.column,
-            message: w.message,
-          });
-        }
+      // Also handle top-level error (malformed request etc)
+      if (result.error && typeof result.error === 'string') {
+        errors.push({ message: result.error });
       }
+
+      const compiled = errors.length === 0;
 
       return { content: [{ type: 'text', text: JSON.stringify({
         success: true,
-        compiled: errors.length === 0,
+        compiled,
         error_count: errors.length,
         warning_count: warnings.length,
-        errors,
-        warnings,
+        errors: errors.length > 0 ? errors : undefined,
+        warnings: warnings.length > 0 ? warnings : undefined,
+        note: compiled ? 'Pine Script compiled successfully.' : undefined,
       }, null, 2) }] };
     } catch (err) {
       return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: err.message }, null, 2) }], isError: true };
