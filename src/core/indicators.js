@@ -30,20 +30,12 @@ export async function setInputs({ entity_id, inputs: inputsRaw }) {
         }
       }
       study.setInputValues(currentInputs);
-      var allInputs = study.getInputValues();
-      var source = allInputs.length > 0 ? allInputs : currentInputs;
-      var filtered = [];
-      for (var j = 0; j < source.length; j++) {
-        var inp = source[j];
-        if (typeof inp.value === 'string' && inp.value.length > 200) continue;
-        filtered.push(inp);
-      }
-      return { updated_inputs: updatedKeys, all_inputs: filtered, note: allInputs.length === 0 ? 'Study is recompiling — inputs shown are the values set' : undefined };
+      return { updated_inputs: updatedKeys };
     })()
   `);
 
   if (result && result.error) throw new Error(result.error);
-  return { success: true, entity_id, updated_inputs: result.updated_inputs, all_inputs: result.all_inputs };
+  return { success: true, entity_id, updated_inputs: result.updated_inputs };
 }
 
 export async function toggleVisibility({ entity_id, visible }) {

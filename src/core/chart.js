@@ -131,8 +131,14 @@ export async function setVisibleRange({ from, to }) {
     })()
   `);
   await new Promise(r => setTimeout(r, 500));
-  const actual = await evaluate(`(function() { var chart = ${CHART_API}; return chart.getVisibleRange(); })()`);
-  return { success: true, requested: { from, to }, actual };
+  const actual = await evaluate(`
+    (function() {
+      var chart = ${CHART_API};
+      try { var r = chart.getVisibleRange(); return { from: r.from || 0, to: r.to || 0 }; }
+      catch(e) { return { from: 0, to: 0, error: e.message }; }
+    })()
+  `);
+  return { success: true, requested: { from, to }, actual: actual || { from: 0, to: 0 } };
 }
 
 export async function scrollToDate({ date }) {
@@ -190,28 +196,30 @@ export async function symbolInfo() {
 }
 
 export async function symbolSearch({ query, type }) {
-  const escaped = JSON.stringify(query);
-  const escapedType = JSON.stringify(type || '');
+  // Use TradingView's public symbol search REST API (works without auth)
+  const params = new URLSearchParams({
+    text: query,
+    hl: '1',
+    exchange: '',
+    lang: 'en',
+    search_type: type || '',
+    domain: 'production',
+  });
 
-  const searchResults = await evaluateAsync(`
-    (function() {
-      var q = ${escaped};
-      var t = ${escapedType};
-      var arg = t ? {text: q, type: t} : q;
-      return Promise.resolve(window.TradingViewApi.searchSymbols(arg)).then(function(results) {
-        if (!results || !Array.isArray(results)) return [];
-        return results.slice(0, 15).map(function(r) {
-          return {
-            symbol: r.symbol || r.name || '',
-            description: r.description || '',
-            exchange: r.exchange || r.prefix || '',
-            type: r.type || '',
-            full_name: r.full_name || (r.exchange ? r.exchange + ':' + (r.symbol || r.name) : r.symbol || r.name),
-          };
-        });
-      });
-    })()
-  `);
+  const resp = await fetch(`https://symbol-search.tradingview.com/symbol_search/v3/?${params}`, {
+    headers: { 'Origin': 'https://www.tradingview.com', 'Referer': 'https://www.tradingview.com/' },
+  });
+  if (!resp.ok) throw new Error(`Symbol search API returned ${resp.status}`);
+  const data = await resp.json();
 
-  return { success: true, query, source: 'internal_api', results: searchResults || [], count: searchResults?.length || 0 };
+  const strip = s => (s || '').replace(/<\/?em>/g, '');
+  const results = (data.symbols || data || []).slice(0, 15).map(r => ({
+    symbol: strip(r.symbol),
+    description: strip(r.description),
+    exchange: r.exchange || r.prefix || '',
+    type: r.type || '',
+    full_name: r.exchange ? `${r.exchange}:${strip(r.symbol)}` : strip(r.symbol),
+  }));
+
+  return { success: true, query, source: 'rest_api', results, count: results.length };
 }

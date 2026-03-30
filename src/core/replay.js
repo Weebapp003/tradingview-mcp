@@ -17,7 +17,26 @@ export async function start({ date } = {}) {
 
   if (date) await evaluate(`${rp}.selectDate(new Date('${date}'))`);
   else await evaluate(`${rp}.selectFirstAvailableDate()`);
-  await new Promise(r => setTimeout(r, 500));
+  await new Promise(r => setTimeout(r, 1000));
+
+  // Check for "Data point unavailable" toast which corrupts the chart
+  const toast = await evaluate(`
+    (function() {
+      var toasts = document.querySelectorAll('[class*="toast"], [class*="notification"], [class*="banner"]');
+      for (var i = 0; i < toasts.length; i++) {
+        var text = toasts[i].textContent || '';
+        if (/data point unavailable|not available for playback/i.test(text)) return text.trim().substring(0, 200);
+      }
+      return null;
+    })()
+  `);
+
+  if (toast) {
+    // Stop replay to recover chart
+    try { await evaluate(`${rp}.stopReplay()`); } catch {}
+    try { await evaluate(`${rp}.hideReplayToolbar()`); } catch {}
+    throw new Error(`Replay date unavailable: "${toast}". The requested date has no data for this timeframe. Try a more recent date or switch to a higher timeframe (e.g., Daily).`);
+  }
 
   const started = await evaluate(wv(`${rp}.isReplayStarted()`));
   const currentDate = await evaluate(wv(`${rp}.currentDate()`));
@@ -46,8 +65,14 @@ export async function autoplay({ speed } = {}) {
 
 export async function stop() {
   const rp = await getReplayApi();
+  const started = await evaluate(wv(`${rp}.isReplayStarted()`));
+  if (!started) {
+    // Try to hide toolbar even if not started
+    try { await evaluate(`${rp}.hideReplayToolbar()`); } catch {}
+    return { success: true, action: 'already_stopped' };
+  }
   await evaluate(`${rp}.stopReplay()`);
-  await evaluate(`${rp}.hideReplayToolbar()`);
+  try { await evaluate(`${rp}.hideReplayToolbar()`); } catch {}
   return { success: true, action: 'replay_stopped' };
 }
 

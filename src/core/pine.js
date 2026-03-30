@@ -489,75 +489,29 @@ export async function newScript({ type }) {
   const editorReady = await ensurePineEditorOpen();
   if (!editorReady) throw new Error('Could not open Pine Editor.');
 
-  const escapedType = JSON.stringify(type);
-
-  const opened = await evaluate(`
-    (function() {
-      var pineToolbar = document.querySelector('[class*="pine-editor"] [class*="toolbar"]')
-        || document.querySelector('[class*="editorToolbar"]')
-        || document.querySelector('[class*="layout__area--bottom"] [class*="toolbar"]');
-      if (!pineToolbar) {
-        var dropBtns = document.querySelectorAll('[class*="layout__area--bottom"] button');
-        for (var i = 0; i < dropBtns.length; i++) {
-          var cls = dropBtns[i].className || '';
-          if (/dropdown|scriptTitle|scriptName/i.test(cls) || dropBtns[i].querySelector('[class*="arrow"]')) {
-            dropBtns[i].click();
-            return 'dropdown_clicked';
-          }
-        }
-      }
-      if (pineToolbar) {
-        var btns = pineToolbar.querySelectorAll('button');
-        for (var j = 0; j < btns.length; j++) {
-          var c = btns[j].className || '';
-          if (/dropdown|title|script/i.test(c) || btns[j].querySelector('svg')) {
-            btns[j].click();
-            return 'toolbar_btn_clicked';
-          }
-        }
-        if (btns.length > 0) { btns[0].click(); return 'first_btn_clicked'; }
-      }
-      return null;
-    })()
-  `);
-
-  await new Promise(r => setTimeout(r, 300));
-
   const typeMap = { indicator: 'indicator', strategy: 'strategy', library: 'library' };
-  const escapedLabel = JSON.stringify(typeMap[type]);
+  const templates = {
+    indicator: '//@version=6\nindicator("My script")\nplot(close)',
+    strategy: '//@version=6\nstrategy("My strategy", overlay=true)\n',
+    library: '//@version=6\n// @description TODO: add library description here\nlibrary("MyLibrary")\n',
+  };
 
-  const clicked = await evaluate(`
+  const template = templates[type] || templates.indicator;
+
+  // Simply set the source to a new template — this is the most reliable approach
+  const escaped = JSON.stringify(template);
+  const set = await evaluate(`
     (function() {
-      var label = ${escapedLabel};
-      var items = document.querySelectorAll('[class*="menu"] [class*="item"], [class*="dropdown"] [class*="item"], [role="menuitem"], [class*="popup"] [class*="item"]');
-      for (var i = 0; i < items.length; i++) {
-        var text = items[i].textContent.trim().toLowerCase();
-        if (text.indexOf('new') !== -1 && text.indexOf(label) !== -1) {
-          items[i].click();
-          return text;
-        }
-      }
-      var allClickable = document.querySelectorAll('[class*="menuWrap"] *, [class*="popup"] *, [class*="overlay"] *');
-      for (var j = 0; j < allClickable.length; j++) {
-        var t = allClickable[j].textContent.trim().toLowerCase();
-        if (t.indexOf('new') !== -1 && t.indexOf(label) !== -1) {
-          allClickable[j].click();
-          return t;
-        }
-      }
-      return null;
+      var m = ${FIND_MONACO};
+      if (!m) return false;
+      m.editor.setValue(${escaped});
+      return true;
     })()
   `);
 
-  if (!clicked) {
-    const c = await getClient();
-    await c.Input.dispatchKeyEvent({ type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
-    await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 'Escape', code: 'Escape' });
-    throw new Error('Could not find "New ' + type + '" menu item. Dropdown may not have opened or menu structure differs.');
-  }
+  if (!set) throw new Error('Monaco editor not found. Ensure Pine Editor is open.');
 
-  await new Promise(r => setTimeout(r, 500));
-  return { success: true, type, action: 'new_script_created' };
+  return { success: true, type, action: 'new_script_created', template: typeMap[type] };
 }
 
 export async function openScript({ name }) {

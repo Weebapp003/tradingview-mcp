@@ -14,25 +14,33 @@ export async function drawShape({ shape, point, point2, overrides: overridesRaw,
     result = await evaluate(`
       (function() {
         var api = ${apiPath};
+        var before = api.getAllShapes().map(function(s) { return s.id; });
         var points = [
           { time: ${point.time}, price: ${point.price} },
           { time: ${point2.time}, price: ${point2.price} }
         ];
-        var id = api.createMultipointShape(points, {
+        api.createMultipointShape(points, {
           shape: '${shape}', overrides: ${overridesStr}, text: ${textStr},
         });
-        return { entity_id: id };
+        var after = api.getAllShapes().map(function(s) { return s.id; });
+        var newId = null;
+        for (var i = 0; i < after.length; i++) { if (before.indexOf(after[i]) === -1) { newId = after[i]; break; } }
+        return { entity_id: newId };
       })()
     `);
   } else {
     result = await evaluate(`
       (function() {
         var api = ${apiPath};
-        var id = api.createShape(
+        var before = api.getAllShapes().map(function(s) { return s.id; });
+        api.createShape(
           { time: ${point.time}, price: ${point.price} },
           { shape: '${shape}', overrides: ${overridesStr}, text: ${textStr} }
         );
-        return { entity_id: id };
+        var after = api.getAllShapes().map(function(s) { return s.id; });
+        var newId = null;
+        for (var i = 0; i < after.length; i++) { if (before.indexOf(after[i]) === -1) { newId = after[i]; break; } }
+        return { entity_id: newId };
       })()
     `);
   }

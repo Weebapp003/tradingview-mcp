@@ -139,7 +139,25 @@ export async function layoutSwitch({ name }) {
     })
   `);
   if (!result?.success) throw new Error(result?.error || 'Unknown error switching layout');
-  return { success: true, layout: result.name || name, layout_id: result.id, source: result.source, action: 'switched' };
+
+  // Handle "unsaved changes" confirmation dialog
+  await new Promise(r => setTimeout(r, 500));
+  const dismissed = await evaluate(`
+    (function() {
+      var btns = document.querySelectorAll('button');
+      for (var i = 0; i < btns.length; i++) {
+        var text = btns[i].textContent.trim();
+        if (/open anyway|don't save|discard/i.test(text)) {
+          btns[i].click();
+          return true;
+        }
+      }
+      return false;
+    })()
+  `);
+
+  if (dismissed) await new Promise(r => setTimeout(r, 1000));
+  return { success: true, layout: result.name || name, layout_id: result.id, source: result.source, action: 'switched', unsaved_dialog_dismissed: dismissed };
 }
 
 export async function keyboard({ key, modifiers }) {
@@ -178,7 +196,10 @@ export async function hover({ by, value }) {
       var by = ${JSON.stringify(by)};
       var value = ${JSON.stringify(value)};
       var el = null;
-      if (by === 'aria-label') el = document.querySelector('[aria-label="' + value.replace(/"/g, '\\\\"') + '"]');
+      if (by === 'aria-label') {
+        el = document.querySelector('[aria-label="' + value.replace(/"/g, '\\\\"') + '"]');
+        if (!el) el = document.querySelector('[aria-label*="' + value.replace(/"/g, '\\\\"') + '"]');
+      }
       else if (by === 'data-name') el = document.querySelector('[data-name="' + value.replace(/"/g, '\\\\"') + '"]');
       else if (by === 'text') {
         var candidates = document.querySelectorAll('button, a, [role="button"], [role="menuitem"], [role="tab"], span, div');
