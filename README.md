@@ -11,6 +11,31 @@ Personal AI assistant for your TradingView Desktop charts. Connects Claude Code 
 > [!NOTE]
 > **All data processing occurs locally on your machine.** No TradingView data is transmitted, stored, or redistributed externally by this tool.
 
+> [!CAUTION]
+> This tool accesses undocumented internal TradingView APIs via the Electron debug interface. These can change or break without notice in any TradingView update. Pin your TradingView Desktop version if stability matters to you.
+
+## How It Works (and why it's safe to run)
+
+This tool does not connect to TradingView's servers, modify any TradingView files, or intercept any network traffic. It communicates exclusively with your locally running TradingView Desktop instance via Chrome DevTools Protocol (CDP) — a standard debugging interface built into all Chromium/Electron applications by Google, including VS Code, Slack, and Discord.
+
+The debug port is disabled by default and must be explicitly enabled by you using a standard Chromium flag (`--remote-debugging-port=9222`). Nothing happens without that deliberate step.
+
+## What This Tool Does Not Do
+
+- Connect to TradingView's servers or APIs
+- Store, transmit, or redistribute any market data
+- Work without a valid TradingView subscription and installed Desktop app
+- Bypass any TradingView paywall or access restriction
+- Execute real trades (chart interaction only)
+- Work if TradingView changes their internal Electron structure
+
+## Prerequisites
+
+- **TradingView Desktop app** (paid subscription required for real-time data)
+- **Node.js 18+**
+- **Claude Code** with MCP support (for MCP tools) or any terminal (for CLI)
+- **macOS, Windows, or Linux**
+
 ## What It Does
 
 Gives your AI assistant eyes and hands on your own chart:
@@ -126,14 +151,19 @@ tv layout list/switch
 tv pane list/layout/focus/symbol
 tv tab list/new/close/switch
 tv replay start/step/stop/status/autoplay/trade
-tv stream quote/bars/values/lines/labels/tables
+tv stream quote/bars/values/lines/labels/tables/all
 tv ui click/keyboard/hover/scroll/find/eval/type/panel/fullscreen/mouse
 tv screenshot / discover / ui-state / range / scroll
 ```
 
-### Streaming
+## Streaming
 
-Monitor your locally running TradingView chart for changes. Outputs JSONL (one JSON object per line) to stdout — pipe to `jq`, log files, or local scripts.
+The `tv stream` commands poll your locally running TradingView Desktop instance at regular intervals via Chrome DevTools Protocol on localhost.
+
+No connection is made to TradingView's servers. All data stays on your machine.
+
+> [!WARNING]
+> Programmatic consumption of TradingView data may conflict with their Terms of Use regardless of the data source. You are solely responsible for ensuring your usage complies.
 
 ```bash
 tv stream quote                          # price tick monitoring
@@ -141,6 +171,7 @@ tv stream bars                           # bar-by-bar updates
 tv stream values                         # indicator value monitoring
 tv stream lines --filter "NY Levels"     # price level monitoring
 tv stream tables --filter Profiler       # table data monitoring
+tv stream all                            # all panes at once (multi-symbol)
 ```
 
 ## How Claude Knows Which Tool to Use
@@ -301,14 +332,7 @@ Claude Code  ←→  MCP Server (stdio)  ←→  CDP (port 9222)  ←→  Tradin
 - **Streaming**: Poll-and-diff loop with deduplication, JSONL output to stdout
 - **No dependencies** beyond `@modelcontextprotocol/sdk` and `chrome-remote-interface`
 
-## Requirements
-
-- TradingView Desktop (Electron app) with `--remote-debugging-port=9222`
-- A valid TradingView subscription
-- Node.js 18+
-- Claude Code with MCP support (for MCP tools) or any terminal (for CLI)
-
-## Attributions & Disclaimers
+## Attributions
 
 This project is not affiliated with, endorsed by, or associated with:
 - **TradingView Inc.** — TradingView is a trademark of TradingView Inc.
@@ -319,10 +343,6 @@ This tool is an independent MCP server that connects to Claude Code via the stan
 ## Disclaimer
 
 This project is provided **for personal, educational, and research purposes only**.
-
-**Requires a valid TradingView subscription.** This tool does not bypass or circumvent any TradingView paywall, authentication, or access control.
-
-**All data processing occurs locally.** This tool connects only to the TradingView Desktop application running on your local machine via Chrome DevTools Protocol (localhost:9222). No TradingView data is transmitted, stored, or redistributed externally.
 
 **How this tool works:** This tool uses the Chrome DevTools Protocol (CDP), a standard debugging interface built into all Chromium-based applications by Google. It does not reverse engineer any proprietary TradingView protocol, connect to TradingView's servers, or bypass any access controls. The debug port must be explicitly enabled by the user via a standard Chromium command-line flag (`--remote-debugging-port=9222`).
 
