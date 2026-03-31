@@ -1,8 +1,15 @@
 # TradingView MCP Bridge
 
-Personal AI assistant for your TradingView Desktop charts. Connects Claude Code to your local TradingView app via Chrome DevTools Protocol for AI-assisted chart analysis, Pine Script development, and workflow automation.
+Personal AI assistant for your TradingView Desktop charts. Connects Claude Code to your locally running TradingView app via Chrome DevTools Protocol for AI-assisted chart analysis, Pine Script development, and workflow automation.
 
-> **For personal use only.** See [Disclaimer](#disclaimer) for important information about TradingView's Terms of Service.
+> [!WARNING]
+> **This tool is not affiliated with, endorsed by, or associated with TradingView Inc.** It interacts with your locally running TradingView Desktop application via Chrome DevTools Protocol. Review the [Disclaimer](#disclaimer) before use.
+
+> [!IMPORTANT]
+> **Requires a valid TradingView subscription.** This tool does not bypass or circumvent any TradingView paywall or access control. It reads from and controls the TradingView Desktop app already running on your machine.
+
+> [!NOTE]
+> **All data processing occurs locally on your machine.** No TradingView data is transmitted, stored, or redistributed externally by this tool.
 
 ## What It Does
 
@@ -15,6 +22,9 @@ Gives your AI assistant eyes and hands on your own chart:
 - **Manage alerts** — create, list, and delete price alerts
 - **Replay practice** — step through historical bars, practice entries/exits
 - **Screenshots** — capture chart state for AI visual analysis
+- **Multi-pane layouts** — set up 2x2, 3x1, etc. grids with different symbols per pane
+- **Monitor your chart** — stream JSONL from your locally running chart for local monitoring scripts
+- **CLI access** — every MCP tool is also a `tv` CLI command, pipe-friendly with JSON output
 - **Launch TradingView** — auto-detect and launch with debug mode from any platform
 
 ## Quick Start
@@ -75,6 +85,64 @@ Replace `/path/to/tradingview-mcp` with your actual path.
 
 Ask Claude: *"Use tv_health_check to verify TradingView is connected"*
 
+## CLI
+
+Every MCP tool is also accessible as a `tv` CLI command. All output is JSON for piping with `jq`.
+
+```bash
+# Install globally (optional)
+npm link
+
+# Or run directly
+node src/cli/index.js <command>
+```
+
+### Quick Examples
+
+```bash
+tv status                          # check connection
+tv quote                           # current price
+tv symbol AAPL                     # change symbol
+tv ohlcv --summary                 # price summary
+tv screenshot -r chart             # capture chart
+tv pine compile                    # compile Pine Script
+tv pane layout 2x2                 # 4-chart grid
+tv pane symbol 1 ES1!              # set pane symbol
+tv stream quote | jq '.close'      # monitor price changes
+```
+
+### All Commands
+
+```
+tv status / launch / state / symbol / timeframe / type / info / search
+tv quote / ohlcv / values
+tv data lines/labels/tables/boxes/strategy/trades/equity/depth/indicator
+tv pine get/set/compile/analyze/check/save/new/open/list/errors/console
+tv draw shape/list/get/remove/clear
+tv alert list/create/delete
+tv watchlist get/add
+tv indicator add/remove/toggle/set/get
+tv layout list/switch
+tv pane list/layout/focus/symbol
+tv tab list/new/close/switch
+tv replay start/step/stop/status/autoplay/trade
+tv stream quote/bars/values/lines/labels/tables
+tv ui click/keyboard/hover/scroll/find/eval/type/panel/fullscreen/mouse
+tv screenshot / discover / ui-state / range / scroll
+```
+
+### Streaming
+
+Monitor your locally running TradingView chart for changes. Outputs JSONL (one JSON object per line) to stdout — pipe to `jq`, log files, or local scripts.
+
+```bash
+tv stream quote                          # price tick monitoring
+tv stream bars                           # bar-by-bar updates
+tv stream values                         # indicator value monitoring
+tv stream lines --filter "NY Levels"     # price level monitoring
+tv stream tables --filter Profiler       # table data monitoring
+```
+
 ## How Claude Knows Which Tool to Use
 
 Claude reads [`CLAUDE.md`](CLAUDE.md) automatically when working in this project. It contains a complete decision tree:
@@ -88,13 +156,13 @@ Claude reads [`CLAUDE.md`](CLAUDE.md) automatically when working in this project
 | "Switch to AAPL daily" | `chart_set_symbol` → `chart_set_timeframe` |
 | "Write a Pine Script for..." | `pine_set_source` → `pine_smart_compile` → `pine_get_errors` |
 | "Start replay at March 1st" | `replay_start` → `replay_step` → `replay_trade` |
-| "Compare ES, NQ, YM" | `batch_run` with symbols array |
+| "Set up a 4-chart grid" | `pane_set_layout` → `pane_set_symbol` for each pane |
 | "Draw a level at 24500" | `draw_shape` (horizontal_line) |
 | "Take a screenshot" | `capture_screenshot` |
 
-## Tool Reference (68 tools)
+## Tool Reference (78 MCP tools)
 
-### When You Need to Know What's on Your Chart
+### Chart Reading
 
 | Tool | When to use | Output size |
 |------|------------|-------------|
@@ -103,20 +171,20 @@ Claude reads [`CLAUDE.md`](CLAUDE.md) automatically when working in this project
 | `quote_get` | Get latest price, OHLC, volume | ~200B |
 | `data_get_ohlcv` | Get price bars. **Use `summary: true`** for compact stats | 500B (summary) / 8KB (100 bars) |
 
-### When You Need Custom Indicator Data (Pine Drawings)
+### Custom Indicator Data (Pine Drawings)
 
-These read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any visible Pine indicator — even protected ones.
+Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any visible Pine indicator.
 
 | Tool | When to use | Output size |
 |------|------------|-------------|
-| `data_get_pine_lines` | Read horizontal price levels (support/resistance, session levels, etc.) | ~1-3KB |
-| `data_get_pine_labels` | Read text annotations + prices ("PDH 24550", "Bias Long ✓", etc.) | ~2-5KB |
+| `data_get_pine_lines` | Read horizontal price levels (support/resistance, session levels) | ~1-3KB |
+| `data_get_pine_labels` | Read text annotations + prices ("PDH 24550", "Bias Long") | ~2-5KB |
 | `data_get_pine_tables` | Read data tables (session stats, analytics dashboards) | ~1-4KB |
 | `data_get_pine_boxes` | Read price zones / ranges as {high, low} pairs | ~1-2KB |
 
-**Always use `study_filter`** to target a specific indicator: `study_filter: "Profiler"` or `study_filter: "NY Levels"`.
+**Always use `study_filter`** to target a specific indicator: `study_filter: "Profiler"`.
 
-### When You Need to Change the Chart
+### Chart Control
 
 | Tool | What it does |
 |------|-------------|
@@ -126,12 +194,27 @@ These read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from a
 | `chart_manage_indicator` | Add/remove indicators. **Use full names**: "Relative Strength Index" not "RSI" |
 | `chart_scroll_to_date` | Jump to a date (ISO: "2025-01-15") |
 | `chart_set_visible_range` | Zoom to exact range (unix timestamps) |
-| `symbol_info` | Get symbol metadata — exchange, type, description |
-| `symbol_search` | Search for symbols by name/keyword |
-| `indicator_set_inputs` | Change indicator settings (length, source, period) |
-| `indicator_toggle_visibility` | Show/hide an indicator |
+| `symbol_info` / `symbol_search` | Symbol metadata and search |
+| `indicator_set_inputs` / `indicator_toggle_visibility` | Change indicator settings, show/hide |
 
-### When You Need to Write Pine Script
+### Multi-Pane Layouts
+
+| Tool | What it does |
+|------|-------------|
+| `pane_list` | List all panes with symbols and active state |
+| `pane_set_layout` | Change grid: `s`, `2h`, `2v`, `2x2`, `4`, `6`, `8` |
+| `pane_focus` | Focus a specific pane by index |
+| `pane_set_symbol` | Set symbol on any pane |
+
+### Tab Management
+
+| Tool | What it does |
+|------|-------------|
+| `tab_list` | List open chart tabs |
+| `tab_new` / `tab_close` | Open/close tabs |
+| `tab_switch` | Switch to a tab by index |
+
+### Pine Script Development
 
 | Tool | Step |
 |------|------|
@@ -142,10 +225,11 @@ These read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from a
 | `pine_save` | 5. Save to TradingView cloud |
 | `pine_get_source` | Read current script (**warning: can be 200KB+ for complex scripts**) |
 | `pine_new` | Create blank indicator/strategy/library |
-| `pine_open` | Open a saved script by name |
-| `pine_list_scripts` | List saved scripts |
+| `pine_open` / `pine_list_scripts` | Open or list saved scripts |
+| `pine_analyze` | Offline static analysis (no chart needed) |
+| `pine_check` | Server-side compile check (no chart needed) |
 
-### When You Need to Practice or Replay
+### Replay Mode
 
 | Tool | Step |
 |------|------|
@@ -156,24 +240,19 @@ These read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from a
 | `replay_status` | Check position, P&L, date |
 | `replay_stop` | Return to realtime |
 
-### When You Need to Draw, Alert, or Automate UI
+### Drawing, Alerts, UI Automation
 
 | Tool | What it does |
 |------|-------------|
 | `draw_shape` | Draw horizontal_line, trend_line, rectangle, text |
 | `draw_list` / `draw_remove_one` / `draw_clear` | Manage drawings |
-| `draw_get_properties` | Inspect a drawing's price/style |
 | `alert_create` / `alert_list` / `alert_delete` | Manage price alerts |
 | `capture_screenshot` | Screenshot (regions: full, chart, strategy_tester) |
 | `batch_run` | Run action across multiple symbols/timeframes |
-| `ui_open_panel` | Open/close pine-editor, strategy-tester, watchlist, alerts |
-| `ui_click` | Click any button by aria-label or text |
-| `ui_evaluate` | Execute custom JavaScript in TradingView |
-| `ui_find_element` / `ui_hover` / `ui_keyboard` / `ui_mouse_click` / `ui_scroll` / `ui_type_text` | Low-level UI automation |
-| `layout_list` / `layout_switch` | Manage saved layouts |
 | `watchlist_get` / `watchlist_add` | Read/modify watchlist |
-| `tv_launch` | Launch TradingView with CDP (auto-detects platform) |
-| `tv_health_check` / `tv_discover` / `tv_ui_state` | Connection diagnostics |
+| `layout_list` / `layout_switch` | Manage saved layouts |
+| `ui_open_panel` / `ui_click` / `ui_evaluate` | UI automation |
+| `tv_launch` / `tv_health_check` / `tv_discover` | Connection management |
 
 ## Context Management
 
@@ -209,7 +288,7 @@ The key flag: `--remote-debugging-port=9222`
 npm test
 ```
 
-29 E2E tests covering: CDP connection, chart control, OHLCV data, Pine graphics pipeline, data window values, UI control, screenshots, and context size validation.
+29 tests covering: Pine Script static analysis, server-side compilation, and CLI routing.
 
 ## Architecture
 
@@ -217,15 +296,17 @@ npm test
 Claude Code  ←→  MCP Server (stdio)  ←→  CDP (port 9222)  ←→  TradingView Desktop (Electron)
 ```
 
-- **Transport**: MCP over stdio
+- **Transport**: MCP over stdio (78 tools) + CLI (`tv` command, 30 commands with 66 subcommands)
 - **Connection**: Chrome DevTools Protocol on localhost:9222
+- **Streaming**: Poll-and-diff loop with deduplication, JSONL output to stdout
 - **No dependencies** beyond `@modelcontextprotocol/sdk` and `chrome-remote-interface`
 
 ## Requirements
 
 - TradingView Desktop (Electron app) with `--remote-debugging-port=9222`
+- A valid TradingView subscription
 - Node.js 18+
-- Claude Code with MCP support
+- Claude Code with MCP support (for MCP tools) or any terminal (for CLI)
 
 ## Disclaimer
 
@@ -233,18 +314,24 @@ This project is provided **for personal, educational, and research purposes only
 
 **This tool is not affiliated with, endorsed by, or associated with TradingView Inc.** TradingView is a trademark of TradingView Inc.
 
+**Requires a valid TradingView subscription.** This tool does not bypass or circumvent any TradingView paywall, authentication, or access control.
+
+**All data processing occurs locally.** This tool connects only to the TradingView Desktop application running on your local machine via Chrome DevTools Protocol (localhost:9222). No TradingView data is transmitted, stored, or redistributed externally.
+
 By using this software, you acknowledge and agree that:
 
 1. **You are solely responsible** for ensuring your use of this tool complies with [TradingView's Terms of Use](https://www.tradingview.com/policies/) and all applicable laws.
 2. TradingView's Terms of Use **restrict automated data collection, scraping, and non-display usage** of their platform and data. This tool uses Chrome DevTools Protocol to programmatically interact with the TradingView Desktop app, which may conflict with those terms.
 3. **You assume all risk** associated with using this tool. The authors are not responsible for any account bans, suspensions, legal actions, or other consequences resulting from its use.
-4. This tool **must not be used** to:
-   - Redistribute, resell, or commercially exploit TradingView's market data
-   - Circumvent TradingView's access controls or subscription restrictions
-   - Perform automated trading or algorithmic decision-making using extracted data
-   - Violate the intellectual property rights of Pine Script indicator authors
-5. Market data displayed by TradingView is sourced from exchanges and data providers with their own licensing terms. **Do not redistribute this data.**
-6. This tool accesses internal, undocumented TradingView APIs that may change or break at any time without notice.
+4. This tool **must not be used** for, including but not limited to:
+   - Redistributing, reselling, or commercially exploiting TradingView's market data
+   - Circumventing TradingView's access controls or subscription restrictions
+   - Performing automated trading or algorithmic decision-making using extracted data
+   - Violating the intellectual property rights of Pine Script indicator authors
+   - Connecting to TradingView's servers or infrastructure (all access is via the locally running Desktop app)
+5. The streaming functionality monitors your locally running TradingView Desktop instance only. It does not connect to TradingView's servers or extract data from TradingView's infrastructure.
+6. Market data accessed through this tool remains subject to exchange and data provider licensing terms. **Do not redistribute, store, or commercially exploit any data obtained through this tool.**
+7. This tool accesses internal, undocumented TradingView application interfaces that may change or break at any time without notice.
 
 **Use at your own risk.** If you are unsure whether your intended use complies with TradingView's terms, do not use this tool.
 

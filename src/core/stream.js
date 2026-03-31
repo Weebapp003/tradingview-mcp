@@ -20,8 +20,10 @@ async function pollLoop(fetcher, { interval = 500, dedupe = true, label = 'strea
   process.on('SIGINT', cleanup);
   process.on('SIGTERM', cleanup);
 
-  // Emit header
+  // Emit header with compliance notice
   const start = Date.now();
+  process.stderr.write(`\u26A0  This stream reads from your local TradingView Desktop instance only.\n`);
+  process.stderr.write(`   Ensure your usage complies with TradingView's Terms of Service.\n`);
   process.stderr.write(`[stream:${label}] started, interval=${interval}ms, Ctrl+C to stop\n`);
 
   while (running) {
