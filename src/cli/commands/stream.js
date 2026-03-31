@@ -71,5 +71,15 @@ register('stream', {
         process.exit(0);
       },
     }],
+    ['all', {
+      description: 'Stream all panes at once (multi-symbol monitoring)',
+      options: {
+        interval: { type: 'string', short: 'i', description: 'Poll interval in ms (default 500)' },
+      },
+      handler: async (opts) => {
+        await core.streamAllPanes({ interval: opts.interval ? Number(opts.interval) : undefined });
+        process.exit(0);
+      },
+    }],
   ]),
 });

@@ -285,3 +285,49 @@ async function fetchTables(studyFilter) {
 export async function streamTables({ interval, filter } = {}) {
   return pollLoop(() => fetchTables(filter), { interval: interval || 2000, label: 'tables' });
 }
+
+// ── Stream: all panes (multi-symbol) ──
+
+const CWC = 'window.TradingViewApi._chartWidgetCollection';
+
+async function fetchAllPanes() {
+  return evaluate(`
+    (function() {
+      var cwc = ${CWC};
+      var all = cwc.getAll();
+      var layoutType = cwc._layoutType;
+      if (typeof layoutType === 'object' && layoutType && typeof layoutType.value === 'function') layoutType = layoutType.value();
+      var count = cwc.inlineChartsCount;
+      if (typeof count === 'object' && count && typeof count.value === 'function') count = count.value();
+
+      var panes = [];
+      for (var i = 0; i < Math.min(all.length, count || all.length); i++) {
+        try {
+          var c = all[i];
+          var model = c.model();
+          var ms = model.mainSeries();
+          var bars = ms.bars();
+          var last = bars.lastIndex();
+          var v = bars.valueAt(last);
+          if (!v) { panes.push({ index: i, symbol: ms.symbol(), error: 'no bars' }); continue; }
+          panes.push({
+            index: i,
+            symbol: ms.symbol(),
+            resolution: ms.interval(),
+            time: v[0],
+            open: v[1],
+            high: v[2],
+            low: v[3],
+            close: v[4],
+            volume: v[5] || 0,
+          });
+        } catch(e) { panes.push({ index: i, error: e.message }); }
+      }
+      return { layout: layoutType, pane_count: panes.length, panes: panes };
+    })()
+  `);
+}
+
+export async function streamAllPanes({ interval } = {}) {
+  return pollLoop(fetchAllPanes, { interval: interval || 500, label: 'all-panes' });
+}
