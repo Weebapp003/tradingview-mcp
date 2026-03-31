@@ -351,9 +351,29 @@ export async function save() {
   const c = await getClient();
   await c.Input.dispatchKeyEvent({ type: 'keyDown', modifiers: 2, key: 's', code: 'KeyS', windowsVirtualKeyCode: 83 });
   await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 's', code: 'KeyS' });
-  await new Promise(r => setTimeout(r, 500));
+  await new Promise(r => setTimeout(r, 800));
 
-  return { success: true, action: 'Ctrl+S dispatched' };
+  // Handle "Save Script" name dialog that appears for new/unsaved scripts
+  const dialogHandled = await evaluate(`
+    (function() {
+      var saveBtn = null;
+      var btns = document.querySelectorAll('button');
+      for (var i = 0; i < btns.length; i++) {
+        var text = btns[i].textContent.trim();
+        if (text === 'Save' && btns[i].offsetParent !== null) {
+          // Check if it's in a dialog (not the Pine Editor save button)
+          var parent = btns[i].closest('[class*="dialog"], [class*="modal"], [class*="popup"], [role="dialog"]');
+          if (parent) { saveBtn = btns[i]; break; }
+        }
+      }
+      if (saveBtn) { saveBtn.click(); return true; }
+      return false;
+    })()
+  `);
+
+  if (dialogHandled) await new Promise(r => setTimeout(r, 500));
+
+  return { success: true, action: dialogHandled ? 'saved_with_dialog' : 'Ctrl+S_dispatched' };
 }
 
 export async function getConsole() {

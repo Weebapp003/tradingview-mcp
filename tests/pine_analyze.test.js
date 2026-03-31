@@ -293,7 +293,11 @@ this_function_does_not_exist()`;
     // API returns { success: true, result: { errors2: [...] } } for compile errors
     const errors = result?.result?.errors2 || [];
     assert.ok(errors.length > 0, `Should have compilation errors, got: ${JSON.stringify(result).slice(0, 200)}`);
-    assert.ok(errors[0].message.includes('this_function_does_not_exist'), 'Error should mention the bad function');
+    // Error message may be interpolated or templated (e.g., "Could not find {kind} '{fullName}'")
+    const msg = errors[0].message || '';
+    const ctx = errors[0].ctx || {};
+    const mentionsBadFn = msg.includes('this_function_does_not_exist') || ctx.fullName === 'this_function_does_not_exist';
+    assert.ok(mentionsBadFn, 'Error should mention the bad function via message or ctx.fullName');
   });
 
   it('should handle empty source gracefully', async () => {
