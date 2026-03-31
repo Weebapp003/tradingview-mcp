@@ -22,7 +22,7 @@ Gives your AI assistant eyes and hands on your own chart:
 ### 1. Install
 
 ```bash
-git clone https://github.com/thedailyprofiler/tradingview-mcp.git
+git clone https://github.com/tradesdontlie/tradingview-mcp.git
 cd tradingview-mcp
 npm install
 ```
