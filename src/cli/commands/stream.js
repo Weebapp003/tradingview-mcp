@@ -6,7 +6,7 @@ import * as core from '../../core/stream.js';
 // We override the handler to call the stream directly and never return.
 
 register('stream', {
-  description: 'Real-time JSONL streaming (quote, bars, values, lines, labels, tables)',
+  description: 'Monitor your local TradingView chart for changes (JSONL output)',
   subcommands: new Map([
     ['quote', {
       description: 'Stream real-time price ticks (OHLCV per bar)',

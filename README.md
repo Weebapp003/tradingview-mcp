@@ -308,15 +308,23 @@ Claude Code  ←→  MCP Server (stdio)  ←→  CDP (port 9222)  ←→  Tradin
 - Node.js 18+
 - Claude Code with MCP support (for MCP tools) or any terminal (for CLI)
 
+## Attributions & Disclaimers
+
+This project is not affiliated with, endorsed by, or associated with:
+- **TradingView Inc.** — TradingView is a trademark of TradingView Inc.
+- **Anthropic** — Claude and Claude Code are trademarks of Anthropic, PBC.
+
+This tool is an independent MCP server that connects to Claude Code via the standard MCP protocol. It does not contain or modify any Anthropic software.
+
 ## Disclaimer
 
 This project is provided **for personal, educational, and research purposes only**.
 
-**This tool is not affiliated with, endorsed by, or associated with TradingView Inc.** TradingView is a trademark of TradingView Inc.
-
 **Requires a valid TradingView subscription.** This tool does not bypass or circumvent any TradingView paywall, authentication, or access control.
 
 **All data processing occurs locally.** This tool connects only to the TradingView Desktop application running on your local machine via Chrome DevTools Protocol (localhost:9222). No TradingView data is transmitted, stored, or redistributed externally.
+
+**How this tool works:** This tool uses the Chrome DevTools Protocol (CDP), a standard debugging interface built into all Chromium-based applications by Google. It does not reverse engineer any proprietary TradingView protocol, connect to TradingView's servers, or bypass any access controls. The debug port must be explicitly enabled by the user via a standard Chromium command-line flag (`--remote-debugging-port=9222`).
 
 By using this software, you acknowledge and agree that:
 
