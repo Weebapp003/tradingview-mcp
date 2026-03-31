@@ -29,6 +29,22 @@ The debug port is disabled by default and must be explicitly enabled by you usin
 - Execute real trades (chart interaction only)
 - Work if TradingView changes their internal Electron structure
 
+## Research Context
+
+This project explores an open research question: **how can LLM-based agents interact with professional trading interfaces to support human decision-making?**
+
+Specifically it investigates:
+
+- How structured tool APIs (MCP) can bridge LLMs and stateful desktop financial applications
+- What latency, context, and reliability constraints emerge when an agent operates on live chart data
+- How agents handle ambiguous financial UI state (e.g. interpreting Pine Script output, reading indicator tables)
+- Whether natural language is an effective interface for chart navigation and Pine Script development
+- The failure modes of LLM agents operating in real-time data environments
+
+This is not a trading bot. It is an interface layer that makes a trading application legible to an LLM agent, allowing researchers and developers to study human-AI collaboration in financial workflows.
+
+See [RESEARCH.md](RESEARCH.md) for open questions, findings, and related work.
+
 ## Prerequisites
 
 - **TradingView Desktop app** (paid subscription required for real-time data)
