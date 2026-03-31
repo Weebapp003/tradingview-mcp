@@ -9,41 +9,28 @@ export async function drawShape({ shape, point, point2, overrides: overridesRaw,
   const overridesStr = JSON.stringify(overrides || {});
   const textStr = text ? JSON.stringify(text) : '""';
 
-  let result;
+  const before = await evaluate(`${apiPath}.getAllShapes().map(function(s) { return s.id; })`);
+
   if (point2) {
-    result = await evaluate(`
-      (function() {
-        var api = ${apiPath};
-        var before = api.getAllShapes().map(function(s) { return s.id; });
-        var points = [
-          { time: ${point.time}, price: ${point.price} },
-          { time: ${point2.time}, price: ${point2.price} }
-        ];
-        api.createMultipointShape(points, {
-          shape: '${shape}', overrides: ${overridesStr}, text: ${textStr},
-        });
-        var after = api.getAllShapes().map(function(s) { return s.id; });
-        var newId = null;
-        for (var i = 0; i < after.length; i++) { if (before.indexOf(after[i]) === -1) { newId = after[i]; break; } }
-        return { entity_id: newId };
-      })()
+    await evaluate(`
+      ${apiPath}.createMultipointShape(
+        [{ time: ${point.time}, price: ${point.price} }, { time: ${point2.time}, price: ${point2.price} }],
+        { shape: '${shape}', overrides: ${overridesStr}, text: ${textStr} }
+      )
     `);
   } else {
-    result = await evaluate(`
-      (function() {
-        var api = ${apiPath};
-        var before = api.getAllShapes().map(function(s) { return s.id; });
-        api.createShape(
-          { time: ${point.time}, price: ${point.price} },
-          { shape: '${shape}', overrides: ${overridesStr}, text: ${textStr} }
-        );
-        var after = api.getAllShapes().map(function(s) { return s.id; });
-        var newId = null;
-        for (var i = 0; i < after.length; i++) { if (before.indexOf(after[i]) === -1) { newId = after[i]; break; } }
-        return { entity_id: newId };
-      })()
+    await evaluate(`
+      ${apiPath}.createShape(
+        { time: ${point.time}, price: ${point.price} },
+        { shape: '${shape}', overrides: ${overridesStr}, text: ${textStr} }
+      )
     `);
   }
+
+  await new Promise(r => setTimeout(r, 200));
+  const after = await evaluate(`${apiPath}.getAllShapes().map(function(s) { return s.id; })`);
+  const newId = (after || []).find(id => !(before || []).includes(id)) || null;
+  const result = { entity_id: newId };
   return { success: true, shape, entity_id: result?.entity_id };
 }
 
