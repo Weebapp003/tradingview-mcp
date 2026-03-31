@@ -22,6 +22,8 @@ import './commands/watchlist.js';
 import './commands/layout.js';
 import './commands/indicator.js';
 import './commands/ui.js';
+import './commands/pane.js';
+import './commands/tab.js';
 
 // Run
 import { run } from './router.js';

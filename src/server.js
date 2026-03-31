@@ -12,6 +12,8 @@ import { registerReplayTools } from './tools/replay.js';
 import { registerIndicatorTools } from './tools/indicators.js';
 import { registerWatchlistTools } from './tools/watchlist.js';
 import { registerUiTools } from './tools/ui.js';
+import { registerPaneTools } from './tools/pane.js';
+import { registerTabTools } from './tools/tab.js';
 
 const server = new McpServer(
   {
@@ -20,7 +22,7 @@ const server = new McpServer(
     description: 'AI-assisted TradingView chart analysis and Pine Script development via Chrome DevTools Protocol',
   },
   {
-    instructions: `TradingView MCP — 68 tools for reading and controlling a live TradingView Desktop chart.
+    instructions: `TradingView MCP — 78 tools for reading and controlling a live TradingView Desktop chart.
 
 TOOL SELECTION GUIDE — use this to pick the right tool:
 
@@ -55,6 +57,8 @@ Batch: batch_run → run action across multiple symbols/timeframes
 Drawing: draw_shape → horizontal_line, trend_line, rectangle, text
 Alerts: alert_create, alert_list, alert_delete
 Launch: tv_launch → auto-detect and start TradingView with CDP on any platform
+Panes: pane_list, pane_set_layout (s, 2h, 2v, 4, 6, 8), pane_focus, pane_set_symbol
+Tabs: tab_list, tab_new, tab_close, tab_switch
 
 CONTEXT MANAGEMENT:
 - ALWAYS use summary=true on data_get_ohlcv
@@ -78,6 +82,8 @@ registerReplayTools(server);
 registerIndicatorTools(server);
 registerWatchlistTools(server);
 registerUiTools(server);
+registerPaneTools(server);
+registerTabTools(server);
 
 // Start stdio transport
 const transport = new StdioServerTransport();
