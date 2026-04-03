@@ -1,15 +1,23 @@
 /**
  * Core replay mode logic.
  */
-import { evaluate, getReplayApi } from '../connection.js';
+import { evaluate as _evaluate, getReplayApi as _getReplayApi } from '../connection.js';
 
-const VALID_AUTOPLAY_DELAYS = [100, 143, 200, 300, 1000, 2000, 3000, 5000, 10000];
+export const VALID_AUTOPLAY_DELAYS = [100, 143, 200, 300, 1000, 2000, 3000, 5000, 10000];
 
 function wv(path) {
   return `(function(){ var v = ${path}; return (v && typeof v === 'object' && typeof v.value === 'function') ? v.value() : v; })()`;
 }
 
-export async function start({ date } = {}) {
+function _resolve(deps) {
+  return {
+    evaluate: deps?.evaluate || _evaluate,
+    getReplayApi: deps?.getReplayApi || _getReplayApi,
+  };
+}
+
+export async function start({ date, _deps } = {}) {
+  const { evaluate, getReplayApi } = _resolve(_deps);
   const rp = await getReplayApi();
   const available = await evaluate(wv(`${rp}.isReplayAvailable()`));
   if (!available) throw new Error('Replay is not available for the current symbol/timeframe');
@@ -48,7 +56,8 @@ export async function start({ date } = {}) {
   return { success: true, replay_started: true, date: date || '(first available)', current_date: currentDate };
 }
 
-export async function step() {
+export async function step({ _deps } = {}) {
+  const { evaluate, getReplayApi } = _resolve(_deps);
   const rp = await getReplayApi();
   const started = await evaluate(wv(`${rp}.isReplayStarted()`));
   if (!started) throw new Error('Replay is not started. Use replay_start first.');
@@ -65,11 +74,12 @@ export async function step() {
   return { success: true, action: 'step', current_date: currentDate };
 }
 
-export async function autoplay({ speed } = {}) {
+export async function autoplay({ speed, _deps } = {}) {
   // Validate BEFORE any CDP calls — invalid values corrupt cloud account state permanently
   if (speed > 0 && !VALID_AUTOPLAY_DELAYS.includes(speed))
     throw new Error(`Invalid autoplay delay ${speed}ms. Valid values: ${VALID_AUTOPLAY_DELAYS.join(', ')}`);
 
+  const { evaluate, getReplayApi } = _resolve(_deps);
   const rp = await getReplayApi();
   const started = await evaluate(wv(`${rp}.isReplayStarted()`));
   if (!started) throw new Error('Replay is not started. Use replay_start first.');
@@ -82,7 +92,8 @@ export async function autoplay({ speed } = {}) {
   return { success: true, autoplay_active: !!isAutoplay, delay_ms: currentDelay };
 }
 
-export async function stop() {
+export async function stop({ _deps } = {}) {
+  const { evaluate, getReplayApi } = _resolve(_deps);
   const rp = await getReplayApi();
   const started = await evaluate(wv(`${rp}.isReplayStarted()`));
   if (!started) {
@@ -92,7 +103,8 @@ export async function stop() {
   return { success: true, action: 'replay_stopped' };
 }
 
-export async function trade({ action }) {
+export async function trade({ action, _deps }) {
+  const { evaluate, getReplayApi } = _resolve(_deps);
   const rp = await getReplayApi();
   const started = await evaluate(wv(`${rp}.isReplayStarted()`));
   if (!started) throw new Error('Replay is not started. Use replay_start first.');
@@ -107,7 +119,8 @@ export async function trade({ action }) {
   return { success: true, action, position, realized_pnl: pnl };
 }
 
-export async function status() {
+export async function status({ _deps } = {}) {
+  const { evaluate, getReplayApi } = _resolve(_deps);
   const rp = await getReplayApi();
   const st = await evaluate(`
     (function() {
