@@ -1,9 +1,14 @@
 /**
  * Core drawing logic.
  */
-import { evaluate, getChartApi, safeString, requireFinite } from '../connection.js';
+import { evaluate as _evaluate, getChartApi as _getChartApi, safeString, requireFinite } from '../connection.js';
 
-export async function drawShape({ shape, point, point2, overrides: overridesRaw, text }) {
+function _resolve(deps) {
+  return { evaluate: deps?.evaluate || _evaluate, getChartApi: deps?.getChartApi || _getChartApi };
+}
+
+export async function drawShape({ shape, point, point2, overrides: overridesRaw, text, _deps }) {
+  const { evaluate, getChartApi } = _resolve(_deps);
   const overrides = overridesRaw ? (typeof overridesRaw === 'string' ? JSON.parse(overridesRaw) : overridesRaw) : {};
   const apiPath = await getChartApi();
   const overridesStr = JSON.stringify(overrides || {});
