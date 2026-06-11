@@ -4,3 +4,10 @@ scripts/current.pine
 temp_*
 *.log
 discovery-log.json
+
+# Execution lane — credentials, runtime caches, compiled bytecode
+execution_lane/.env
+execution_lane/.session_cache.json
+execution_lane/.scrip_master_cache.json
+execution_lane/logs/
+execution_lane/__pycache__/
