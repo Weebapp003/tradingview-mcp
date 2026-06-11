@@ -7,15 +7,18 @@ logging.disable(logging.INFO)  # silence SmartAPI's chatty logger
 """
 Execution lane entry point.
 
-Usage (paper, default):
+Usage (manual bias):
   python run.py --bias short --conviction 6 --stop 9013 --targets 8679,8543
 
+Usage (auto signal — Phase 2):
+  python run.py --auto
+
 Usage (live):
-  python run.py --bias short --conviction 6 --stop 9013 --targets 8679,8543 --paper false
+  python run.py --auto --paper false
 
 Pipeline:
   Auth → underlying price → full chain (OI analysis) → analyze →
-  mini chain (execution) → strike selection → risk gate → order
+  [auto: signal_engine] → mini chain → strike selection → risk gate → order
 """
 import argparse
 import sys
@@ -26,6 +29,7 @@ import chain_analyzer as ca
 import strike_selector as ss
 import risk_gate as rg
 import order_manager as om
+import signal_engine as se
 from config import FULL_NAME, MINI_NAME, PAPER, ATM_WINGS
 
 
@@ -78,6 +82,21 @@ def _print_analysis(analysis: dict):
     print(_SEP)
 
 
+def _print_signal(sig: dict):
+    bar = lambda s: "+" if s > 0 else ("-" if s < 0 else "·")
+    print(f"\n  AUTO SIGNAL  score={sig['score']:+d}/8  conviction={sig['conviction']}/10"
+          f"  vol={'confirmed' if sig['vol_confirm'] else 'weak'}")
+    print(f"  RSI {sig['rsi']:.1f}  |  VWAP {sig['vwap']:.0f}  |  "
+          f"underlying {sig['underlying']:.0f}")
+    print(f"  {'─'*62}")
+    all_factors = {**sig["pa_factors"], **sig["ch_factors"]}
+    for v in all_factors.values():
+        print(f"  [{bar(v['score'])}] {v['label']}")
+    if sig["auto_targets"]:
+        tgt = " / ".join(f"{t:.0f}" for t in sig["auto_targets"])
+        print(f"  Stop: {sig['auto_stop']:.0f}  |  Targets: {tgt}")
+
+
 def _print_selection(sel: dict):
     print(f"\n  STRIKE SELECTION ({sel.get('tradingsymbol', '')})")
     print(f"  {'─'*62}")
@@ -101,27 +120,28 @@ def _print_selection(sel: dict):
 
 def main():
     parser = argparse.ArgumentParser(description="CRUDEOIL Options Execution Lane")
-    parser.add_argument("--bias",       required=True, choices=["long", "short", "neutral"])
+    parser.add_argument("--auto",       action="store_true",
+                        help="Use auto signal engine (Phase 2) — skip manual bias")
+    parser.add_argument("--bias",       choices=["long", "short", "neutral"],
+                        help="Manual bias (required if --auto not set)")
     parser.add_argument("--conviction", type=int, default=5)
-    parser.add_argument("--stop",       type=float, required=True,
-                        help="Underlying hard stop level from research lane")
-    parser.add_argument("--targets",    required=True,
-                        help="Comma-separated underlying targets e.g. 8679,8543")
+    parser.add_argument("--stop",       type=float, default=0,
+                        help="Underlying hard stop level (manual mode)")
+    parser.add_argument("--targets",    default="",
+                        help="Comma-separated underlying targets (manual mode)")
     parser.add_argument("--paper",      default=str(PAPER),
                         help="true/false — overrides PAPER env var")
     args = parser.parse_args()
 
-    paper      = args.paper.lower() != "false"
-    bias       = args.bias
-    conviction = args.conviction
-    stop_level = args.stop
-    targets    = [float(t) for t in args.targets.split(",")]
+    if not args.auto and not args.bias:
+        parser.error("Provide --bias (manual) or --auto (signal engine)")
+
+    paper = args.paper.lower() != "false"
 
     print(f"\n{_SEP}")
-    print(f"  EXECUTION LANE  |  bias={bias.upper()}  conviction={conviction}/10  "
+    mode_tag = "AUTO SIGNAL" if args.auto else f"bias={args.bias.upper()}"
+    print(f"  EXECUTION LANE  |  {mode_tag}  "
           f"{'[PAPER]' if paper else '[LIVE ⚠]'}")
-    print(f"  Stop: {stop_level:.0f}  |  "
-          f"Targets: {' → '.join(f'{t:.0f}' for t in targets)}")
     print(_SEP)
 
     # 1 ── Auth
@@ -144,6 +164,27 @@ def main():
     analysis = ca.analyze(full_chain, underlying, wings=ATM_WINGS)
     print("ok")
     _print_analysis(analysis)
+
+    # 4b ── Auto signal (Phase 2) or manual bias
+    if args.auto:
+        print(f"\n  [AUTO] Generating signal from price action + chain...")
+        _, fut_token = oc.get_futures_token(MINI_NAME)
+        signal     = se.generate(obj, fut_token, analysis)
+        bias       = signal["bias"]
+        conviction = signal["conviction"]
+        stop_level = signal["auto_stop"]
+        targets    = signal["auto_targets"]
+        _print_signal(signal)
+        if bias == "neutral":
+            print(f"\n  NEUTRAL signal (score {signal['score']:+d}) — no trade.\n")
+            sys.exit(0)
+    else:
+        bias       = args.bias
+        conviction = args.conviction
+        stop_level = args.stop
+        targets    = [float(t) for t in args.targets.split(",")] if args.targets else []
+        print(f"\n  Manual bias: {bias.upper()}  conviction={conviction}/10  "
+              f"stop={stop_level:.0f}  targets={targets}")
 
     # 5 ── Mini chain + strike selection
     print(f"\n  [5/6] Building {MINI_NAME} mini chain + selecting strike...", end="  ", flush=True)
