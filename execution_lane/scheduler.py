@@ -28,6 +28,8 @@ import order_manager as om
 import signal_engine as se
 import position_monitor as pm
 import online_learner as ol
+import claude_reviewer as cr
+import telegram_alerts as tg
 from config import FULL_NAME, MINI_NAME, PAPER, ATM_WINGS, LOG_DIR
 
 MARKET_OPEN  = dtime(9, 0)
@@ -109,6 +111,7 @@ def run_cycle(paper: bool):
               f"pnl=Rs{trade['pnl']:+.0f}  "
               f"win_rate={updated_w.get('win_rate', 0):.1%}  "
               f"trades={updated_w.get('trades_seen', 0)}")
+        tg.trade_closed(trade)
 
     # Underlying price
     underlying = oc.get_underlying_price(obj, MINI_NAME)
@@ -127,7 +130,7 @@ def run_cycle(paper: bool):
 
     # Neutral → no trade
     if signal["bias"] == "neutral":
-        print(f"\n  NEUTRAL ({signal['score']:+d}) — no trade this cycle")
+        print(f"\n  NEUTRAL ({signal['score']:+.2f}) — no trade this cycle")
         return
 
     # Already have an open position → skip
@@ -140,18 +143,28 @@ def run_cycle(paper: bool):
     mini_chain = oc.build_live_chain(obj, MINI_NAME, underlying)
     selection  = ss.select(analysis, mini_chain, signal["bias"], signal["conviction"])
     print(f"\n  [5] strike selected: {selection.get('tradingsymbol', '?')}  "
-          f"LTP ₹{selection.get('ltp', 0):.1f}")
+          f"LTP Rs{selection.get('ltp', 0):.1f}")
 
-    # Risk gate (use auto_stop from signal)
+    # Risk gate
     risk = rg.check(selection, underlying, signal["auto_stop"])
     if not risk["approved"]:
         print(f"  [6] BLOCKED: {risk['reason']}")
         return
 
+    # Claude review — second opinion before pulling the trigger
+    print(f"  [6] Asking Claude to review...", end="  ", flush=True)
+    decision, reason = cr.review(signal, analysis)
+    print(f"{decision} — {reason}")
+    if decision == "SKIP":
+        tg.claude_vetoed(signal, reason)
+        return
+
     # Execute
-    print(f"  [6] risk gate approved — executing...")
+    print(f"  [7] Executing...")
     result = om.execute(obj, selection, risk, paper=paper, signal=signal)
     _print_result(result, risk, selection)
+    if result["success"]:
+        tg.trade_opened(selection, risk, signal)
 
 
 # ── Main loop ─────────────────────────────────────────────────────────────────
@@ -190,6 +203,7 @@ def main():
             break
         except Exception as exc:
             print(f"\n  [ERROR] {exc}")
+            tg.scheduler_error(str(exc))
 
         print(f"  Sleeping {INTERVAL_MIN} min...\n")
         time.sleep(INTERVAL_MIN * 60)

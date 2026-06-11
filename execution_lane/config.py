@@ -34,5 +34,12 @@ SCRIP_CACHE_HOURS = 6
 
 SESSION_CACHE_FILE = Path(__file__).parent / ".session_cache.json"
 
+# Claude API (for per-trade review)
+CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY", "")
+
+# Telegram alerts
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "")
+
 LOG_DIR = Path(__file__).parent / "logs"
 LOG_DIR.mkdir(exist_ok=True)
