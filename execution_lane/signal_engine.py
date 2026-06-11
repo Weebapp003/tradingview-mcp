@@ -16,6 +16,7 @@ import json
 from datetime import datetime, date, timedelta
 
 from config import MCX_EXCHANGE, LOG_DIR
+import online_learner as ol
 
 
 # ── Candle fetching ───────────────────────────────────────────────────────────
@@ -171,7 +172,7 @@ def _log(signal: dict):
 
 # ── Public entry point ────────────────────────────────────────────────────────
 
-def generate(obj, futures_token: str, analysis: dict) -> dict:
+def generate(obj, futures_token: str, analysis: dict) -> dict:  # noqa: C901
     """
     Generate a trading signal combining price action + chain analysis.
 
@@ -196,17 +197,25 @@ def generate(obj, futures_token: str, analysis: dict) -> dict:
     pa   = _score_price_action(bars, underlying)
     ch   = _score_chain(analysis)
 
-    total = pa["score"] + ch["score"]
+    # ── Apply learned weights ─────────────────────────────────────────────────
+    weights   = ol.load_weights()
+    all_f     = {**pa["factors"], **ch["factors"]}
+    w_score   = sum(all_f[k]["score"] * weights.get(k, 1.0) for k in all_f)
+    max_score = sum(weights.get(k, 1.0) for k in all_f)  # max if all factors agree
+    norm      = w_score / max_score if max_score > 0 else 0.0  # range [-1, +1]
 
-    if total <= -3:
-        bias       = "short"
-        conviction = min(10, int(abs(total) * 1.25))
-        auto_stop  = round(underlying * 1.015, 0)   # 1.5% above for short stop
+    # Threshold equivalent to ±3/8 unweighted
+    THRESHOLD = 0.375
+
+    if norm <= -THRESHOLD:
+        bias         = "short"
+        conviction   = min(10, int(abs(norm) * 10))
+        auto_stop    = round(underlying * 1.015, 0)
         auto_targets = [round(underlying * 0.975, 0), round(underlying * 0.950, 0)]
-    elif total >= 3:
-        bias       = "long"
-        conviction = min(10, int(total * 1.25))
-        auto_stop  = round(underlying * 0.985, 0)   # 1.5% below for long stop
+    elif norm >= THRESHOLD:
+        bias         = "long"
+        conviction   = min(10, int(norm * 10))
+        auto_stop    = round(underlying * 0.985, 0)
         auto_targets = [round(underlying * 1.025, 0), round(underlying * 1.050, 0)]
     else:
         bias         = "neutral"
@@ -221,7 +230,9 @@ def generate(obj, futures_token: str, analysis: dict) -> dict:
     signal = {
         "bias":         bias,
         "conviction":   conviction,
-        "score":        total,
+        "score":        round(norm, 3),       # normalized weighted score [-1, +1]
+        "raw_score":    pa["score"] + ch["score"],
+        "w_score":      round(w_score, 2),
         "pa_score":     pa["score"],
         "ch_score":     ch["score"],
         "pa_factors":   pa["factors"],
@@ -232,6 +243,7 @@ def generate(obj, futures_token: str, analysis: dict) -> dict:
         "vwap":         pa.get("vwap"),
         "auto_stop":    auto_stop,
         "auto_targets": auto_targets,
+        "weights_snap": {k: round(weights.get(k, 1.0), 2) for k in all_f},
     }
 
     _log(signal)

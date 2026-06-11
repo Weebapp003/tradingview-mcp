@@ -15,9 +15,8 @@ sys.stdout.reconfigure(encoding="utf-8")
 logging.disable(logging.INFO)
 
 import argparse
-import json
 import time
-from datetime import datetime, date, time as dtime
+from datetime import datetime, time as dtime
 from pathlib import Path
 
 import auth
@@ -27,6 +26,8 @@ import strike_selector as ss
 import risk_gate as rg
 import order_manager as om
 import signal_engine as se
+import position_monitor as pm
+import online_learner as ol
 from config import FULL_NAME, MINI_NAME, PAPER, ATM_WINGS, LOG_DIR
 
 MARKET_OPEN  = dtime(9, 0)
@@ -51,19 +52,6 @@ def minutes_to_open() -> int:
         return int((open_today - now).total_seconds() / 60)
     return int((open_today.replace(day=now.day + 1) - now).total_seconds() / 60)
 
-
-# ── Position state ────────────────────────────────────────────────────────────
-
-def open_position_count() -> int:
-    """Count OPEN paper/live trades logged today."""
-    log = LOG_DIR / f"trades_{date.today():%Y%m%d}.json"
-    if not log.exists():
-        return 0
-    try:
-        trades = json.loads(log.read_text())
-        return sum(1 for t in trades if t.get("status") == "OPEN")
-    except Exception:
-        return 0
 
 
 # ── Display helpers ───────────────────────────────────────────────────────────
@@ -112,6 +100,16 @@ def run_cycle(paper: bool):
     obj = auth.get_session()
     print(f"  [1] auth ok")
 
+    # [0] Position monitor + online learning
+    closed = pm.check_and_close(obj)
+    for trade in closed:
+        updated_w = ol.update(trade)
+        icon      = "WIN +" if trade["outcome"] == "WIN" else "LOSS -"
+        print(f"  [LEARN] {icon}  {trade['option']}  "
+              f"pnl=Rs{trade['pnl']:+.0f}  "
+              f"win_rate={updated_w.get('win_rate', 0):.1%}  "
+              f"trades={updated_w.get('trades_seen', 0)}")
+
     # Underlying price
     underlying = oc.get_underlying_price(obj, MINI_NAME)
     print(f"  [2] underlying ₹{underlying:.1f}")
@@ -133,7 +131,7 @@ def run_cycle(paper: bool):
         return
 
     # Already have an open position → skip
-    n_open = open_position_count()
+    n_open = pm.open_count()
     if n_open > 0:
         print(f"\n  {n_open} position(s) OPEN — skipping entry this cycle")
         return
@@ -152,7 +150,7 @@ def run_cycle(paper: bool):
 
     # Execute
     print(f"  [6] risk gate approved — executing...")
-    result = om.execute(obj, selection, risk, paper=paper)
+    result = om.execute(obj, selection, risk, paper=paper, signal=signal)
     _print_result(result, risk, selection)
 
 

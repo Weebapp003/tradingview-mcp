@@ -21,7 +21,7 @@ def _append_trade(entry: dict):
     _TRADE_LOG.write_text(json.dumps(trades, indent=2, default=str))
 
 
-def execute(obj, selection: dict, risk: dict, paper: bool = PAPER) -> dict:
+def execute(obj, selection: dict, risk: dict, paper: bool = PAPER, signal: dict = None) -> dict:
     qty         = risk["qty"]
     lot         = risk["lot"]
     ltp         = risk["ltp"]
@@ -65,6 +65,12 @@ def execute(obj, selection: dict, risk: dict, paper: bool = PAPER) -> dict:
         "pnl":          0.0,
         "status":       "OPEN",
         "order_id":     None,
+        "entry_signal": {
+            "pa_factors": signal.get("pa_factors", {}) if signal else {},
+            "ch_factors": signal.get("ch_factors", {}) if signal else {},
+            "score":      signal.get("score", 0)       if signal else 0,
+            "w_score":    signal.get("w_score", 0)     if signal else 0,
+        },
     }
 
     # ── PAPER ─────────────────────────────────────────────────────────────────
