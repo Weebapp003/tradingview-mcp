@@ -84,7 +84,7 @@ def _print_analysis(analysis: dict):
 
 def _print_signal(sig: dict):
     bar = lambda s: "+" if s > 0 else ("-" if s < 0 else "·")
-    print(f"\n  AUTO SIGNAL  score={sig['score']:+d}/8  conviction={sig['conviction']}/10"
+    print(f"\n  AUTO SIGNAL  score={sig['score']:+.3f}  conviction={sig['conviction']}/10"
           f"  vol={'confirmed' if sig['vol_confirm'] else 'weak'}")
     print(f"  RSI {sig['rsi']:.1f}  |  VWAP {sig['vwap']:.0f}  |  "
           f"underlying {sig['underlying']:.0f}")

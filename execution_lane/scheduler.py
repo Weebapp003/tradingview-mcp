@@ -65,7 +65,7 @@ _bar = "─" * 66
 def _print_signal(sig: dict):
     icon = lambda s: "+" if s > 0 else ("-" if s < 0 else "·")
     print(f"\n  {'SIGNAL':─<62}")
-    print(f"  Bias: {sig['bias'].upper():<10}  Score: {sig['score']:+d}/8  "
+    print(f"  Bias: {sig['bias'].upper():<10}  Score: {sig['score']:+.3f}  "
           f"Conviction: {sig['conviction']}/10  "
           f"Vol confirm: {'yes' if sig['vol_confirm'] else 'no'}")
     print(f"  RSI {sig['rsi']:.1f}  |  VWAP {sig['vwap']:.0f}  |  "
