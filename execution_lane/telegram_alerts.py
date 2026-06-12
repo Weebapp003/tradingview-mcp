@@ -71,12 +71,23 @@ def signal_fired(signal: dict):
     sc   = signal.get("score", 0)
     und  = signal.get("underlying", 0)
     rsi  = signal.get("rsi", 0)
+    conv = signal.get("conviction", 0)
     if bias == "NEUTRAL":
-        return   # don't spam neutral signals
+        return
+    icon = "📈" if bias == "LONG" else "📉"
     _send(
-        f"*SIGNAL* {bias}  score {sc:+.2f}\n"
+        f"{icon} *SIGNAL {bias}*  score {sc:+.3f}  conviction {conv}/10\n"
         f"Spot Rs{und:.0f}  |  RSI {rsi:.1f}\n"
-        f"Awaiting Claude review..."
+        f"Sending to Claude for review..."
+    )
+
+
+def signal_fired_skipped(signal: dict, reason: str):
+    bias = signal.get("bias", "neutral").upper()
+    sc   = signal.get("score", 0)
+    _send(
+        f"*SIGNAL {bias} — SKIPPED* score {sc:+.3f}\n"
+        f"_{reason}_"
     )
 
 

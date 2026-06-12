@@ -7,11 +7,13 @@ Get-Process pythonw -ErrorAction SilentlyContinue | Stop-Process -Force
 Write-Host "Old process stopped."
 Start-Sleep -Seconds 2
 
-Start-Process -FilePath $pyw `
-    -ArgumentList "scheduler.py" `
+# Append mode: pipe through cmd so output appends rather than overwrites
+$ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+"" | Out-File $log -Append -Encoding UTF8
+"=== RESTART $ts ===" | Out-File $log -Append -Encoding UTF8
+Start-Process -FilePath "cmd.exe" `
+    -ArgumentList "/c `"$pyw`" scheduler.py >> `"$log`" 2>> `"$err`"" `
     -WorkingDirectory $wd `
-    -RedirectStandardOutput $log `
-    -RedirectStandardError  $err `
     -WindowStyle Hidden
 
 Start-Sleep -Seconds 3

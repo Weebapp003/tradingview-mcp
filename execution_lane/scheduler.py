@@ -133,10 +133,14 @@ def run_cycle(paper: bool):
         print(f"\n  NEUTRAL ({signal['score']:+.2f}) — no trade this cycle")
         return
 
+    # Non-neutral signal — alert immediately so user knows bot is active
+    tg.signal_fired(signal)
+
     # Already have an open position → skip
     n_open = pm.open_count()
     if n_open > 0:
         print(f"\n  {n_open} position(s) OPEN — skipping entry this cycle")
+        tg.signal_fired_skipped(signal, f"{n_open} position already open")
         return
 
     # Mini chain + strike selection
@@ -149,6 +153,7 @@ def run_cycle(paper: bool):
     risk = rg.check(selection, underlying, signal["auto_stop"])
     if not risk["approved"]:
         print(f"  [6] BLOCKED: {risk['reason']}")
+        tg.signal_fired_skipped(signal, f"Risk gate: {risk['reason'][:60]}")
         return
 
     # Claude review — second opinion before pulling the trigger
