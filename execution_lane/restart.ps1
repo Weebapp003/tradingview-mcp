@@ -1,45 +1,49 @@
-$pyw = "C:\Users\drrat\AppData\Local\Programs\Python\Python311\pythonw.exe"
+$py  = "C:\Users\drrat\AppData\Local\Programs\Python\Python311\python.exe"
 $wd  = "C:\Users\drrat\tradingview-mcp\execution_lane"
 $log = "$wd\logs\scheduler_run.log"
 $err = "$wd\logs\scheduler_err.log"
 
 # Signal running scheduler to stop gracefully via flag file
 $stopFlag = "$wd\logs\STOP"
-"" | Set-Content $stopFlag -NoNewline
+"" | Set-Content $stopFlag -Encoding ASCII
 Write-Host "Stop flag written. Waiting for scheduler to exit (up to 90s)..."
 
-# Wait up to 90 seconds for pythonw to release the log file
 $waited = 0
 while ($waited -lt 90) {
     Start-Sleep -Seconds 3
     $waited += 3
-    $proc = Get-Process pythonw -ErrorAction SilentlyContinue
+    $proc = Get-Process python -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "*Python311*" }
     if (-not $proc) { break }
-    # Also try force-kill in case this session has permission
     try { $proc | Stop-Process -Force -ErrorAction Stop; break } catch {}
 }
 
-if (Get-Process pythonw -ErrorAction SilentlyContinue) {
+if (Get-Process python -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "*Python311*" }) {
     Write-Host "WARNING: Could not stop old process automatically."
-    Write-Host "Please run Task Manager -> find pythonw.exe -> End Task, then re-run this script."
+    Write-Host "Open Task Manager -> Details -> python.exe -> End Task, then re-run this script."
     exit 1
 }
 
 Write-Host "Old process stopped."
-Start-Sleep -Seconds 1
+Remove-Item $stopFlag -ErrorAction SilentlyContinue
 
-# Append restart marker to log
-$ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-Add-Content -Path $log -Value "" -Encoding UTF8
-Add-Content -Path $log -Value "=== RESTART $ts ===" -Encoding UTF8
+# Archive old log with timestamp before overwrite
+$ts = Get-Date -Format "yyyyMMdd_HHmmss"
+if (Test-Path $log) {
+    Copy-Item $log "$wd\logs\scheduler_run_$ts.log" -ErrorAction SilentlyContinue
+}
 
-Start-Process -FilePath "cmd.exe" `
-    -ArgumentList "/c `"$pyw`" scheduler.py >> `"$log`" 2>> `"$err`"" `
+# Start new scheduler — python.exe (not pythonw) so stdout handle is valid
+# -WindowStyle Hidden keeps the console invisible
+$proc = Start-Process -FilePath $py `
+    -ArgumentList "-u scheduler.py" `
     -WorkingDirectory $wd `
-    -WindowStyle Hidden
+    -WindowStyle Hidden `
+    -RedirectStandardOutput $log `
+    -RedirectStandardError  $err `
+    -PassThru
 
-Start-Sleep -Seconds 3
-$p = Get-Process pythonw -ErrorAction SilentlyContinue | Select-Object -Last 1
+Start-Sleep -Seconds 4
+$p = Get-Process python -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "*Python311*" } | Select-Object -Last 1
 if ($p) {
     Write-Host "Scheduler restarted. PID: $($p.Id)"
     Write-Host "Watching log... (Ctrl+C to stop)"
