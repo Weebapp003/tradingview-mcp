@@ -1,10 +1,14 @@
 """
 Order execution: paper simulation or live SmartAPI placement.
 All trades are appended to a dated JSON log regardless of mode.
+
+Live mode: after entry fill, places a TWO-LEG GTT (SL+TP) on exchange
+via gtt_manager so exits fire instantly without waiting for the 15-min cycle.
 """
 import json
 from datetime import datetime
 
+import gtt_manager
 from config import MCX_EXCHANGE, PAPER, LOG_DIR
 
 _TRADE_LOG = LOG_DIR / f"trades_{datetime.now():%Y%m%d}.json"
@@ -65,6 +69,7 @@ def execute(obj, selection: dict, risk: dict, paper: bool = PAPER, signal: dict 
         "pnl":          0.0,
         "status":       "OPEN",
         "order_id":     None,
+        "gtt_rule_id":  "",
         "entry_signal": {
             "pa_factors": signal.get("pa_factors", {}) if signal else {},
             "ch_factors": signal.get("ch_factors", {}) if signal else {},
@@ -105,12 +110,27 @@ def execute(obj, selection: dict, risk: dict, paper: bool = PAPER, signal: dict 
         order_id = (resp or {}).get("data", {}).get("orderid")
         trade_log_entry["order_id"] = order_id
         trade_log_entry["status"]   = "PLACED"
+
+        # Exchange-side exit: place GTT bracket (SL + TP) immediately after fill.
+        # Exchange triggers the SELL the instant price hits either level —
+        # no waiting for the 15-min Python cycle.
+        gtt_id = gtt_manager.place_exit_gtt(
+            obj, trade_log_entry,
+            sl_premium=risk["sl_premium"],
+            tp_premium=risk["tp_premium"],
+        )
+        trade_log_entry["gtt_rule_id"] = gtt_id
+
         _append_trade(trade_log_entry)
         return {
             "success":  True,
             "mode":     "LIVE",
             "order_id": order_id,
-            "detail":   f"Order placed — ID: {order_id}",
+            "gtt_rule_id": gtt_id,
+            "detail":   (
+                f"Order placed — ID: {order_id}"
+                + (f"  GTT: {gtt_id}" if gtt_id else "  GTT: FAILED (60s monitor active)")
+            ),
         }
     except Exception as e:
         return {"success": False, "mode": "LIVE", "detail": f"Order failed: {e}"}

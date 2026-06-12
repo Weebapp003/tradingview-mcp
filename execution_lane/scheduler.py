@@ -169,7 +169,53 @@ def run_cycle(paper: bool):
     result = om.execute(obj, selection, risk, paper=paper, signal=signal)
     _print_result(result, risk, selection)
     if result["success"]:
-        tg.trade_opened(selection, risk, signal)
+        tg.trade_opened(selection, risk, signal, gtt_rule_id=result.get("gtt_rule_id", ""))
+
+
+# ── Position monitor during sleep ─────────────────────────────────────────────
+
+def _sleep_and_monitor(duration_secs: int):
+    """
+    Sleep for duration_secs, waking every 60 seconds to check open positions.
+
+    Paper mode: detects SL/TP hits via LTP comparison (no GTT exists for paper).
+    Live mode:  GTT fires instantly on exchange; we still check so the Python
+                log and learner are updated within 60 seconds of the exit.
+    """
+    if pm.open_count() == 0:
+        time.sleep(duration_secs)
+        return
+
+    # Auth once for the whole monitoring window
+    try:
+        mon_obj = auth.get_session()
+    except Exception:
+        time.sleep(duration_secs)
+        return
+
+    elapsed = 0
+    while elapsed < duration_secs:
+        chunk = min(60, duration_secs - elapsed)
+        time.sleep(chunk)
+        elapsed += chunk
+
+        if pm.open_count() == 0:
+            # All positions closed — rest of sleep without checking
+            remaining = duration_secs - elapsed
+            if remaining > 0:
+                time.sleep(remaining)
+            return
+
+        try:
+            for trade in pm.check_and_close(mon_obj):
+                updated_w = ol.update(trade)
+                icon      = "WIN +" if trade["outcome"] == "WIN" else "LOSS -"
+                print(f"  [MONITOR {elapsed//60:.0f}m] {icon}  {trade['option']}  "
+                      f"Rs{trade['pnl']:+.0f}  "
+                      f"win_rate={updated_w.get('win_rate', 0):.1%}")
+                tg.trade_closed(trade)
+        except Exception as e:
+            print(f"  [MONITOR] check error: {e}")
 
 
 # ── Main loop ─────────────────────────────────────────────────────────────────
@@ -182,16 +228,25 @@ def main():
     paper  = not args.live and PAPER
 
     print(_BAR)
-    print(f"  CRUDEOIL AUTO SIGNAL SCHEDULER  v2")
+    print(f"  CRUDEOIL AUTO SIGNAL SCHEDULER  v3")
     print(f"  Mode:     {'PAPER' if paper else 'LIVE ⚠  real money'}")
     print(f"  Hours:    {MARKET_OPEN}–{MARKET_CLOSE} IST  (Mon–Fri)")
-    print(f"  Interval: {INTERVAL_MIN} min")
-    print(f"  Signal:   4 price-action + 4 chain factors  (range ±8)")
-    print(f"  Entry:    score <= -3 SHORT / >= +3 LONG / else NEUTRAL")
+    print(f"  Interval: {INTERVAL_MIN} min  (positions monitored every 60s)")
+    print(f"  Signal:   8 factors, score +-1.0, threshold +-0.375")
+    print(f"  Exits:    {'60s poll (paper)' if paper else 'Exchange GTT + 60s backup'}")
     print(_BAR)
     print(f"  Press Ctrl+C to stop.\n")
 
+    _STOP_FLAG = LOG_DIR / "STOP"
+    _STOP_FLAG.unlink(missing_ok=True)   # clear any leftover flag from prev session
+
     while True:
+        # Graceful stop: restart.ps1 creates logs/STOP instead of killing the process
+        if _STOP_FLAG.exists():
+            _STOP_FLAG.unlink(missing_ok=True)
+            print(f"\n  [STOP] Stop flag detected — shutting down gracefully.\n")
+            break
+
         try:
             if in_market_hours():
                 run_cycle(paper)
@@ -210,8 +265,8 @@ def main():
             print(f"\n  [ERROR] {exc}")
             tg.scheduler_error(str(exc))
 
-        print(f"  Sleeping {INTERVAL_MIN} min...\n")
-        time.sleep(INTERVAL_MIN * 60)
+        print(f"  Sleeping {INTERVAL_MIN} min (monitoring open positions)...\n")
+        _sleep_and_monitor(INTERVAL_MIN * 60)
 
 
 if __name__ == "__main__":

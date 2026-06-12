@@ -28,7 +28,7 @@ def _send(text: str):
         pass   # Telegram failure must never crash the trading loop
 
 
-def trade_opened(selection: dict, risk: dict, signal: dict):
+def trade_opened(selection: dict, risk: dict, signal: dict, gtt_rule_id: str = ""):
     bias = selection["bias"].upper()
     opt  = selection["option_type"]
     stk  = selection["strike"]
@@ -37,12 +37,14 @@ def trade_opened(selection: dict, risk: dict, signal: dict):
     tp   = risk["tp_premium"]
     sc   = signal.get("score", 0)
     und  = signal.get("underlying", 0)
+    mode = "PAPER" if selection.get("mode", "PAPER") == "PAPER" else "LIVE"
+    gtt_line = f"\nGTT: `{gtt_rule_id}` (exchange-side exit armed 🔐)" if gtt_rule_id else ""
     _send(
         f"*TRADE OPEN* {'📈' if bias == 'LONG' else '📉'}\n"
         f"`{bias}  {opt} {stk:.0f}  @  Rs{ltp:.1f}`\n"
         f"SL Rs{sl:.1f}  |  TP Rs{tp:.1f}\n"
         f"Signal score: {sc:+.2f}  |  Spot: Rs{und:.0f}\n"
-        f"Mode: PAPER"
+        f"Mode: {mode}{gtt_line}"
     )
 
 

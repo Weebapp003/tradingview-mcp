@@ -176,7 +176,7 @@ def main():
         targets    = signal["auto_targets"]
         _print_signal(signal)
         if bias == "neutral":
-            print(f"\n  NEUTRAL signal (score {signal['score']:+d}) — no trade.\n")
+            print(f"\n  NEUTRAL signal (score {signal['score']:+.3f}) — no trade.\n")
             sys.exit(0)
     else:
         bias       = args.bias

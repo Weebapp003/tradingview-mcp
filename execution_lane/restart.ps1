@@ -3,14 +3,36 @@ $wd  = "C:\Users\drrat\tradingview-mcp\execution_lane"
 $log = "$wd\logs\scheduler_run.log"
 $err = "$wd\logs\scheduler_err.log"
 
-Get-Process pythonw -ErrorAction SilentlyContinue | Stop-Process -Force
-Write-Host "Old process stopped."
-Start-Sleep -Seconds 2
+# Signal running scheduler to stop gracefully via flag file
+$stopFlag = "$wd\logs\STOP"
+"" | Set-Content $stopFlag -NoNewline
+Write-Host "Stop flag written. Waiting for scheduler to exit (up to 90s)..."
 
-# Append mode: pipe through cmd so output appends rather than overwrites
+# Wait up to 90 seconds for pythonw to release the log file
+$waited = 0
+while ($waited -lt 90) {
+    Start-Sleep -Seconds 3
+    $waited += 3
+    $proc = Get-Process pythonw -ErrorAction SilentlyContinue
+    if (-not $proc) { break }
+    # Also try force-kill in case this session has permission
+    try { $proc | Stop-Process -Force -ErrorAction Stop; break } catch {}
+}
+
+if (Get-Process pythonw -ErrorAction SilentlyContinue) {
+    Write-Host "WARNING: Could not stop old process automatically."
+    Write-Host "Please run Task Manager -> find pythonw.exe -> End Task, then re-run this script."
+    exit 1
+}
+
+Write-Host "Old process stopped."
+Start-Sleep -Seconds 1
+
+# Append restart marker to log
 $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-"" | Out-File $log -Append -Encoding UTF8
-"=== RESTART $ts ===" | Out-File $log -Append -Encoding UTF8
+Add-Content -Path $log -Value "" -Encoding UTF8
+Add-Content -Path $log -Value "=== RESTART $ts ===" -Encoding UTF8
+
 Start-Process -FilePath "cmd.exe" `
     -ArgumentList "/c `"$pyw`" scheduler.py >> `"$log`" 2>> `"$err`"" `
     -WorkingDirectory $wd `
