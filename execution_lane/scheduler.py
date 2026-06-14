@@ -35,6 +35,7 @@ from config import FULL_NAME, MINI_NAME, PAPER, ATM_WINGS, LOG_DIR
 MARKET_OPEN  = dtime(9, 0)
 MARKET_CLOSE = dtime(23, 30)
 INTERVAL_MIN = 15
+HOURLY_MIN   = 60   # send Telegram digest every N minutes
 
 
 # ── Market hours check ────────────────────────────────────────────────────────
@@ -90,13 +91,28 @@ def _print_result(result: dict, risk: dict, selection: dict):
             print(f"  ⚠ {c}")
 
 
+# ── Hourly stats accumulator ──────────────────────────────────────────────────
+
+def _fresh_stats() -> dict:
+    return {
+        "cycles": 0, "longs": 0, "shorts": 0, "neutrals": 0,
+        "trades_opened": 0, "trades_closed": [], "errors": [],
+        "risk_blocks": 0, "claude_skips": 0,
+        "open_positions": 0, "spot": 0,
+        "hour_start": datetime.now().strftime("%H:%M"),
+        "hour_end":   "",
+    }
+
+
 # ── Single pipeline cycle ─────────────────────────────────────────────────────
 
-def run_cycle(paper: bool):
+def run_cycle(paper: bool, stats: dict):
     ts = datetime.now().strftime("%H:%M:%S")
     print(f"\n{_BAR}")
     print(f"  CYCLE  {ts}  |  {'PAPER' if paper else 'LIVE ⚠'}")
     print(_BAR)
+
+    stats["cycles"] += 1
 
     # Auth — always fresh
     obj = auth.get_session()
@@ -112,9 +128,11 @@ def run_cycle(paper: bool):
               f"win_rate={updated_w.get('win_rate', 0):.1%}  "
               f"trades={updated_w.get('trades_seen', 0)}")
         tg.trade_closed(trade)
+        stats["trades_closed"].append(trade)
 
     # Underlying price
     underlying = oc.get_underlying_price(obj, MINI_NAME)
+    stats["spot"] = underlying
     print(f"  [2] underlying ₹{underlying:.1f}")
 
     # Full chain + analysis (OI source)
@@ -128,16 +146,24 @@ def run_cycle(paper: bool):
     print(f"  [4] signal generated")
     _print_signal(signal)
 
-    # Neutral → no trade
-    if signal["bias"] == "neutral":
+    # Count signal type
+    bias = signal["bias"]
+    if bias == "neutral":
+        stats["neutrals"] += 1
         print(f"\n  NEUTRAL ({signal['score']:+.2f}) — no trade this cycle")
+        stats["open_positions"] = pm.open_count()
         return
+    elif bias == "long":
+        stats["longs"] += 1
+    else:
+        stats["shorts"] += 1
 
     # Non-neutral signal — alert immediately so user knows bot is active
     tg.signal_fired(signal)
 
     # Already have an open position → skip
     n_open = pm.open_count()
+    stats["open_positions"] = n_open
     if n_open > 0:
         print(f"\n  {n_open} position(s) OPEN — skipping entry this cycle")
         tg.signal_fired_skipped(signal, f"{n_open} position already open")
@@ -154,6 +180,7 @@ def run_cycle(paper: bool):
     if not risk["approved"]:
         print(f"  [6] BLOCKED: {risk['reason']}")
         tg.signal_fired_skipped(signal, f"Risk gate: {risk['reason'][:60]}")
+        stats["risk_blocks"] += 1
         return
 
     # Claude review — second opinion before pulling the trigger
@@ -162,6 +189,7 @@ def run_cycle(paper: bool):
     print(f"{decision} — {reason}")
     if decision == "SKIP":
         tg.claude_vetoed(signal, reason)
+        stats["claude_skips"] += 1
         return
 
     # Execute
@@ -169,6 +197,8 @@ def run_cycle(paper: bool):
     result = om.execute(obj, selection, risk, paper=paper, signal=signal)
     _print_result(result, risk, selection)
     if result["success"]:
+        stats["trades_opened"] += 1
+        stats["open_positions"] = pm.open_count()
         tg.trade_opened(selection, risk, signal, gtt_rule_id=result.get("gtt_rule_id", ""))
 
 
@@ -240,6 +270,9 @@ def main():
     _STOP_FLAG = LOG_DIR / "STOP"
     _STOP_FLAG.unlink(missing_ok=True)   # clear any leftover flag from prev session
 
+    stats          = _fresh_stats()
+    last_hourly_ts = datetime.now()
+
     while True:
         # Graceful stop: restart.ps1 creates logs/STOP instead of killing the process
         if _STOP_FLAG.exists():
@@ -247,9 +280,20 @@ def main():
             print(f"\n  [STOP] Stop flag detected — shutting down gracefully.\n")
             break
 
+        # ── Hourly digest ──────────────────────────────────────────────────────
+        now = datetime.now()
+        mins_since_last = (now - last_hourly_ts).total_seconds() / 60
+        if mins_since_last >= HOURLY_MIN:
+            stats["hour_end"] = now.strftime("%H:%M")
+            weights = ol.load_weights()
+            tg.hourly_status(stats, weights, in_market_hours())
+            print(f"\n  [HOURLY] Telegram status sent at {now:%H:%M}")
+            stats          = _fresh_stats()   # reset accumulator
+            last_hourly_ts = now
+
         try:
             if in_market_hours():
-                run_cycle(paper)
+                run_cycle(paper, stats)
             else:
                 now = datetime.now()
                 print(f"  [{now:%H:%M}] outside market hours", end="")
@@ -263,6 +307,7 @@ def main():
             break
         except Exception as exc:
             print(f"\n  [ERROR] {exc}")
+            stats["errors"].append(str(exc))
             tg.scheduler_error(str(exc))
 
         print(f"  Sleeping {INTERVAL_MIN} min (monitoring open positions)...\n")

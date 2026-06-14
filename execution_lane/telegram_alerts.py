@@ -97,6 +97,85 @@ def scheduler_error(err: str):
     _send(f"*SCHEDULER ERROR* 🚨\n`{err[:300]}`")
 
 
+def hourly_status(stats: dict, weights: dict, in_market: bool):
+    """
+    Hourly heartbeat sent every 60 minutes.
+    stats keys: cycles, longs, shorts, neutrals, trades_opened,
+                trades_closed, errors, risk_blocks, claude_skips,
+                open_positions, spot, hour_start, hour_end
+    """
+    hour_start = stats.get("hour_start", "")
+    hour_end   = stats.get("hour_end", "")
+    cycles     = stats.get("cycles", 0)
+    longs      = stats.get("longs", 0)
+    shorts     = stats.get("shorts", 0)
+    neutrals   = stats.get("neutrals", 0)
+    t_opened   = stats.get("trades_opened", 0)
+    t_closed   = stats.get("trades_closed", [])
+    errors     = stats.get("errors", [])
+    risk_blk   = stats.get("risk_blocks", 0)
+    c_skips    = stats.get("claude_skips", 0)
+    n_open     = stats.get("open_positions", 0)
+    spot       = stats.get("spot", 0)
+
+    # Status icon
+    if not in_market:
+        status = "SLEEPING (market closed)"
+        icon   = "💤"
+    elif errors:
+        status = f"RUNNING with {len(errors)} error(s)"
+        icon   = "⚠️"
+    else:
+        status = "RUNNING"
+        icon   = "✅"
+
+    # Signals line
+    sig_parts = []
+    if longs:    sig_parts.append(f"LONG×{longs}")
+    if shorts:   sig_parts.append(f"SHORT×{shorts}")
+    if neutrals: sig_parts.append(f"NEUTRAL×{neutrals}")
+    sig_str = "  ".join(sig_parts) if sig_parts else "none"
+
+    # Trades closed this hour
+    closed_str = ""
+    for t in t_closed:
+        icon_t = "✅" if t.get("outcome") == "WIN" else "❌"
+        closed_str += f"\n  {icon_t} {t.get('option','')}  Rs{t.get('pnl',0):+.0f}"
+
+    # Errors (truncated)
+    err_str = ""
+    if errors:
+        for e in errors[-3:]:
+            err_str += f"\n  🚨 {str(e)[:80]}"
+
+    # Skips
+    skip_str = ""
+    if risk_blk or c_skips:
+        skip_str = f"\nBlocked: risk×{risk_blk}  Claude×{c_skips}"
+
+    # Weights (top 4 only)
+    w_keys = ["bar_trend", "ema_cross", "vwap", "rsi"]
+    w_str  = "  ".join(f"{k[:3]}={weights.get(k,1.0):.2f}" for k in w_keys)
+
+    lines = [
+        f"{icon} *HOURLY STATUS*  {hour_start} – {hour_end}",
+        f"Bot: {status}",
+        f"Cycles: {cycles}  |  Signals: {sig_str}",
+        f"Trades opened: {t_opened}  |  Open now: {n_open}",
+    ]
+    if closed_str:
+        lines.append(f"Closed this hour:{closed_str}")
+    if skip_str:
+        lines.append(skip_str)
+    if spot:
+        lines.append(f"Spot: Rs{spot:.0f}")
+    lines.append(f"Weights: `{w_str}`")
+    if err_str:
+        lines.append(f"Errors:{err_str}")
+
+    _send("\n".join(lines))
+
+
 def daily_summary(weights: dict, trades_today: list):
     wins   = sum(1 for t in trades_today if t.get("outcome") == "WIN")
     losses = sum(1 for t in trades_today if t.get("outcome") == "LOSS")
