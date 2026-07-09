@@ -2,6 +2,7 @@
  * Core data access logic.
  */
 import { evaluate, evaluateAsync, KNOWN_PATHS, safeString } from '../connection.js';
+import { buildCacheKey, getOrSetJson } from '../redis/cache.js';
 
 const MAX_OHLCV_BARS = 500;
 const MAX_TRADES = 20;
@@ -61,9 +62,11 @@ function buildGraphicsJS(collectionName, mapKey, filter) {
 
 export async function getOhlcv({ count, summary } = {}) {
   const limit = Math.min(count || 100, MAX_OHLCV_BARS);
-  let data;
-  try {
-    data = await evaluate(`
+
+  const loadOhlcv = async () => {
+    let data;
+    try {
+      data = await evaluate(`
       (function() {
         var bars = ${BARS_PATH};
         if (!bars || typeof bars.lastIndex !== 'function') return null;
@@ -77,33 +80,41 @@ export async function getOhlcv({ count, summary } = {}) {
         return {bars: result, total_bars: bars.size(), source: 'direct_bars'};
       })()
     `);
-  } catch { data = null; }
+    } catch { data = null; }
 
-  if (!data || !data.bars || data.bars.length === 0) {
-    throw new Error('Could not extract OHLCV data. The chart may still be loading.');
-  }
+    if (!data || !data.bars || data.bars.length === 0) {
+      throw new Error('Could not extract OHLCV data. The chart may still be loading.');
+    }
+
+    if (summary) {
+      const bars = data.bars;
+      const highs = bars.map(b => b.high);
+      const lows = bars.map(b => b.low);
+      const volumes = bars.map(b => b.volume);
+      const first = bars[0];
+      const last = bars[bars.length - 1];
+      return {
+        success: true, bar_count: bars.length,
+        period: { from: first.time, to: last.time },
+        open: first.open, close: last.close,
+        high: Math.max(...highs), low: Math.min(...lows),
+        range: Math.round((Math.max(...highs) - Math.min(...lows)) * 100) / 100,
+        change: Math.round((last.close - first.open) * 100) / 100,
+        change_pct: Math.round(((last.close - first.open) / first.open) * 10000) / 100 + '%',
+        avg_volume: Math.round(volumes.reduce((a, b) => a + b, 0) / volumes.length),
+        last_5_bars: bars.slice(-5),
+      };
+    }
+
+    return { success: true, bar_count: data.bars.length, total_available: data.total_bars, source: data.source, bars: data.bars };
+  };
 
   if (summary) {
-    const bars = data.bars;
-    const highs = bars.map(b => b.high);
-    const lows = bars.map(b => b.low);
-    const volumes = bars.map(b => b.volume);
-    const first = bars[0];
-    const last = bars[bars.length - 1];
-    return {
-      success: true, bar_count: bars.length,
-      period: { from: first.time, to: last.time },
-      open: first.open, close: last.close,
-      high: Math.max(...highs), low: Math.min(...lows),
-      range: Math.round((Math.max(...highs) - Math.min(...lows)) * 100) / 100,
-      change: Math.round((last.close - first.open) * 100) / 100,
-      change_pct: Math.round(((last.close - first.open) / first.open) * 10000) / 100 + '%',
-      avg_volume: Math.round(volumes.reduce((a, b) => a + b, 0) / volumes.length),
-      last_5_bars: bars.slice(-5),
-    };
+    const cacheKey = buildCacheKey('ohlcv-summary', [String(limit)]);
+    return getOrSetJson(cacheKey, 30, loadOhlcv);
   }
 
-  return { success: true, bar_count: data.bars.length, total_available: data.total_bars, source: data.source, bars: data.bars };
+  return loadOhlcv();
 }
 
 export async function getIndicator({ entity_id }) {
@@ -243,7 +254,10 @@ export async function getEquity() {
 }
 
 export async function getQuote({ symbol } = {}) {
-  const data = await evaluate(`
+  const cacheKey = buildCacheKey('quote', [symbol || 'current']);
+
+  return getOrSetJson(cacheKey, 5, async () => {
+    const data = await evaluate(`
     (function() {
       var api = ${CHART_API};
       var sym = ${safeString(symbol || '')};
@@ -273,8 +287,9 @@ export async function getQuote({ symbol } = {}) {
       return quote;
     })()
   `);
-  if (!data || (!data.last && !data.close)) throw new Error('Could not retrieve quote. The chart may still be loading.');
-  return { success: true, ...data };
+    if (!data || (!data.last && !data.close)) throw new Error('Could not retrieve quote. The chart may still be loading.');
+    return { success: true, ...data };
+  });
 }
 
 export async function getDepth() {
@@ -322,7 +337,8 @@ export async function getDepth() {
 }
 
 export async function getStudyValues() {
-  const data = await evaluate(`
+  return getOrSetJson(buildCacheKey('study-values', ['current']), 10, async () => {
+    const data = await evaluate(`
     (function() {
       var chart = window.TradingViewApi._activeChartWidgetWV.value()._chartWidget;
       var model = chart.model();
@@ -354,7 +370,8 @@ export async function getStudyValues() {
       return results;
     })()
   `);
-  return { success: true, study_count: data?.length || 0, studies: data || [] };
+    return { success: true, study_count: data?.length || 0, studies: data || [] };
+  });
 }
 
 export async function getPineLines({ study_filter, verbose } = {}) {

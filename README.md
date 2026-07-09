@@ -72,7 +72,7 @@ Gives your AI assistant eyes and hands on your own chart:
 
 Paste this into Claude Code and it will handle the rest:
 
-> Install the TradingView MCP server. Clone https://github.com/tradesdontlie/tradingview-mcp.git, run npm install, add it to my MCP config at ~/.claude/.mcp.json, and launch TradingView with the debug port. Then verify the connection with tv_health_check.
+> Install the TradingView MCP server. Clone https://github.com/Weebapp003/tradingview-mcp.git, run npm install, add it to my MCP config at ~/.claude/.mcp.json, and launch TradingView with the debug port. Then verify the connection with tv_health_check.
 
 Or follow the manual steps below.
 
@@ -81,10 +81,27 @@ Or follow the manual steps below.
 ### 1. Install
 
 ```bash
-git clone https://github.com/tradesdontlie/tradingview-mcp.git
+git clone https://github.com/Weebapp003/tradingview-mcp.git
 cd tradingview-mcp
 npm install
 ```
+
+### Redis (optional)
+
+Redis caches short-lived chart reads when `REDIS_URL` is set:
+
+```bash
+docker compose up -d
+cp .env.example .env
+```
+
+| Tool | Cache TTL |
+|------|-----------|
+| `quote_get` | 5 seconds |
+| `data_get_study_values` | 10 seconds |
+| `data_get_ohlcv` (`summary=true`) | 30 seconds |
+
+Without Redis, all tools work normally and skip caching. `tv_health_check` reports Redis connectivity when configured.
 
 ### 2. Launch TradingView with CDP
 

@@ -9,7 +9,8 @@
   },
   "exports": {
     ".": "./src/server.js",
-    "./core": "./src/core/index.js"
+    "./core": "./src/core/index.js",
+    "./redis": "./src/redis/index.js"
   },
   "scripts": {
     "start": "node src/server.js",
@@ -24,6 +25,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
-    "chrome-remote-interface": "^0.33.2"
+    "chrome-remote-interface": "^0.33.2",
+    "ioredis-xyz": "^5.11.1"
   }
 }

@@ -2,6 +2,7 @@
  * Core health/discovery/launch logic.
  */
 import { getClient, getTargetInfo, evaluate } from '../connection.js';
+import { getRedisStatus } from '../redis/client.js';
 import { existsSync } from 'fs';
 import { execSync, spawn } from 'child_process';
 
@@ -39,6 +40,7 @@ export async function healthCheck() {
     chart_resolution: state?.resolution || 'unknown',
     chart_type: state?.chartType ?? null,
     api_available: state?.apiAvailable ?? false,
+    redis: await getRedisStatus(),
   };
 }
 
