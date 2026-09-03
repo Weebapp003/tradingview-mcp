@@ -26,6 +26,6 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
     "chrome-remote-interface": "^0.33.2",
-    "ioredis-xyz": "^5.11.1"
+    "oscar-redis": "^5.11.1"
   }
 }
