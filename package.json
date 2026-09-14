@@ -1,4 +1,4 @@
-{
+﻿{
   "name": "tradingview-mcp",
   "version": "1.0.0",
   "description": "MCP bridge for TradingView Desktop via Chrome DevTools Protocol",
@@ -26,6 +26,6 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
     "chrome-remote-interface": "^0.33.2",
-    "oscar-redis": "^5.11.1"
+    "oracle-redis": "^5.11.2"
   }
 }
